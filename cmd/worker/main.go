@@ -514,6 +514,8 @@ func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []st
 			args = append(args, "-b:a", profile.AudioBitrate)
 		}
 	}
+	// 只输出音视频：字幕流播放端用不到，还会让 muxer 为交错攒包等字幕
+	args = append(args, "-sn", "-dn")
 	segDur := job.Output.SegmentDuration
 	if segDur == 0 {
 		segDur = 6

@@ -605,6 +605,9 @@ func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, dur
 	args = append(args, "-b:a", ab)
 	// 强制立体声 + 48kHz，避免 5.1 声道 / 高采样率导致的兼容问题
 	args = append(args, "-ac", "2", "-ar", "48000")
+	// 只输出音视频。源里有字幕时默认映射会带上一路字幕：播放端用不到，muxer
+	// 还要为交错攒约 10 秒的包等字幕，首切片明显变慢。
+	args = append(args, "-sn", "-dn")
 
 	// HLS 输出
 	if segDur <= 0 {
