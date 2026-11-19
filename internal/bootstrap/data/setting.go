@@ -336,7 +336,7 @@ func InitialSettings() []model.SettingItem {
 		{Key: conf.TranscodeSegmentDuration, Value: "6", Type: conf.TypeNumber, Group: model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `HLS/DASH 切片时长(秒)，越小首帧越快但请求数变多，推荐 4-10`},
 		{Key: conf.TranscodeHWAccel, Value: "none", Type: conf.TypeSelect,
-			Options: "none,auto,nvenc,qsv,vaapi,amf,videotoolbox",
+			Options: "none,auto,nvenc,qsv,vaapi,amf,videotoolbox,v4l2m2m",
 			Group:   model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `GPU 硬件加速：
 none = 纯 CPU(libx264)
@@ -345,7 +345,8 @@ nvenc = NVIDIA GPU(GeForce/Tesla/Quadro/RTX,需 NVIDIA 驱动)
 qsv = Intel 集显/独显 QuickSync(免费,功耗低)
 vaapi = Linux 通用 VA-API(支持 Intel/AMD)
 amf = AMD GPU(Windows AMF)
-videotoolbox = macOS 硬件加速`},
+videotoolbox = macOS 硬件加速
+v4l2m2m = Linux V4L2 M2M 硬件编解码(树莓派/Amlogic/高通等 ARM 设备,Docker 需映射 /dev/video*)`},
 		{Key: conf.TranscodeFFmpegPath, Value: "ffmpeg", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `FFmpeg 可执行路径，留空则使用 PATH 中的 ffmpeg`},
 		{Key: conf.TranscodeFFprobePath, Value: "ffprobe", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,

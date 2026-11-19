@@ -220,7 +220,7 @@ const (
 	TranscodeOutputAudioBitrate = "transcode_output_audio_bitrate" // 输出音频码率，例如 160k
 	TranscodeOutputResolution   = "transcode_output_resolution"    // 输出分辨率上限
 	TranscodeSegmentDuration    = "transcode_segment_duration"     // HLS 切片时长(秒)
-	TranscodeHWAccel            = "transcode_hwaccel"              // 硬件加速类型 none/auto/nvenc/qsv/vaapi/amf/videotoolbox
+	TranscodeHWAccel            = "transcode_hwaccel"              // 硬件加速类型 none/auto/nvenc/qsv/vaapi/amf/videotoolbox/v4l2m2m
 	TranscodeFFmpegPath         = "transcode_ffmpeg_path"          // 自定义 ffmpeg 可执行路径
 	TranscodeFFprobePath        = "transcode_ffprobe_path"         // 自定义 ffprobe 可执行路径
 	TranscodeRunMode            = "transcode_run_mode"             // local / remote / hybrid

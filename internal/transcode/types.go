@@ -42,6 +42,7 @@ const (
 	HWVAAPI        HWAccel = "vaapi"        // Linux VA-API
 	HWAMF          HWAccel = "amf"          // AMD AMF
 	HWVideoToolbox HWAccel = "videotoolbox" // macOS
+	HWV4L2M2M      HWAccel = "v4l2m2m"      // Linux V4L2 M2M（树莓派、Amlogic、高通等 ARM SoC）
 )
 
 // SourceProbe 源文件探测信息（由 ffprobe 得出）
@@ -52,6 +53,7 @@ type SourceProbe struct {
 	VideoBitrate int64   `json:"video_bitrate"` // bps
 	Width        int     `json:"width"`
 	Height       int     `json:"height"`
+	PixFmt       string  `json:"pix_fmt"` // yuv420p / yuv420p10le ...
 	AudioCodec   string  `json:"audio_codec"`
 	AudioBitrate int64   `json:"audio_bitrate"`
 }

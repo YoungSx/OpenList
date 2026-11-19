@@ -21,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/v4l2m2m"
 )
 
 var (
@@ -28,7 +30,7 @@ var (
 	secret    = flag.String("secret", "", "Worker 共享密钥（与 Master 配置一致）")
 	name      = flag.String("name", hostname(), "Worker 名称")
 	capacity  = flag.Int("capacity", 2, "并发任务数")
-	hwaccel   = flag.String("hwaccel", "none", "硬件加速：none/auto/nvenc/qsv/vaapi/amf/videotoolbox")
+	hwaccel   = flag.String("hwaccel", "none", "硬件加速：none/auto/nvenc/qsv/vaapi/amf/videotoolbox/v4l2m2m")
 	workdir   = flag.String("workdir", "./worker_tmp", "临时工作目录")
 	ffmpeg    = flag.String("ffmpeg", "ffmpeg", "ffmpeg 路径")
 )
@@ -93,10 +95,17 @@ type OutputSpec struct {
 	Format          string `json:"format"`
 	SegmentDuration int    `json:"segment_duration"`
 }
+type Probe struct {
+	VideoCodec string `json:"video_codec"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	PixFmt     string `json:"pix_fmt"`
+}
 type Job struct {
 	ID            string     `json:"id"`
 	Path          string     `json:"path"`
 	SourceURL     string     `json:"source_url"`
+	Probe         Probe      `json:"probe"`
 	Profiles      []Profile  `json:"profiles"`
 	Output        OutputSpec `json:"output"`
 	CallbackToken string     `json:"callback_token"`
@@ -163,6 +172,13 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("[worker] registered: id=%s heartbeat=%ds\n", workerID, hbInterval)
+	if strings.EqualFold(*hwaccel, "v4l2m2m") {
+		if caps := v4l2m2m.Detect(); caps.Empty() {
+			fmt.Println("[worker] v4l2m2m: no V4L2 M2M codec device found, using CPU codecs (in Docker, pass the /dev/video* devices to the container)")
+		} else {
+			fmt.Printf("[worker] v4l2m2m: %s\n", caps)
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
@@ -455,6 +471,9 @@ func (s *workerState) uploadSegment(job Job, profile string, seq int, dur float6
 
 // ---- ffmpeg args（与 master 端 local_runner 保持一致）----
 
+// detectV4L2M2M 可在测试中替换，避免依赖本机设备
+var detectV4L2M2M = v4l2m2m.Detect
+
 // protocolWhitelistFor 与 internal/transcode.ProtocolWhitelistFor 保持一致：
 // 远程输入只放行 HTTP(S) 及其传输层，本地路径只放行 file。
 func protocolWhitelistFor(source string) string {
@@ -470,6 +489,10 @@ func protocolWhitelistFor(source string) string {
 func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []string {
 	hw := strings.ToLower(profile.HWAccel)
 	args := []string{"-y", "-loglevel", "warning"}
+	var v4l2 v4l2m2m.Caps
+	if hw == "v4l2m2m" {
+		v4l2 = detectV4L2M2M()
+	}
 	switch hw {
 	case "nvenc":
 		args = append(args, "-hwaccel", "cuda")
@@ -487,8 +510,20 @@ func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []st
 	// 限制 ffmpeg 可用协议：Master 下发的 source_url 不应被解释成 concat:/subfile: 等特殊协议。
 	// -protocol_whitelist 是输入选项，必须位于 -i 之前。
 	args = append(args, "-protocol_whitelist", protocolWhitelistFor(job.SourceURL))
+	// V4L2 M2M 编解码器不属于 -hwaccel，按设备声明点名；设备不支持时用软件编解码
+	if dec := v4l2.Decoder(job.Probe.VideoCodec, job.Probe.PixFmt, job.Probe.Width, job.Probe.Height); dec != "" {
+		args = append(args, "-c:v", dec)
+	}
 	args = append(args, "-i", job.SourceURL)
-	args = append(args, "-c:v", pickEncoder(profile.VideoCodec, hw))
+	vcodec := pickEncoder(profile.VideoCodec, hw)
+	if enc := v4l2.Encoder(profile.VideoCodec); enc != "" {
+		vcodec = enc
+	}
+	args = append(args, "-c:v", vcodec)
+	if strings.HasSuffix(vcodec, "_v4l2m2m") {
+		// 设备只收它支持的原始格式，NV12 最通用，也正是硬解输出的格式
+		args = append(args, "-pix_fmt", "nv12")
+	}
 	if profile.VideoBitrate != "" {
 		args = append(args, "-b:v", profile.VideoBitrate, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
 	}
@@ -514,7 +549,8 @@ func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []st
 			args = append(args, "-b:a", profile.AudioBitrate)
 		}
 	}
-	// 只输出音视频：字幕流播放端用不到，还会让 muxer 为交错攒包等字幕
+	// 只输出音视频：字幕流播放端用不到，还会让 muxer 为交错攒包等字幕，
+	// V4L2 M2M 编码器的输出包被攒住时转码会卡死
 	args = append(args, "-sn", "-dn")
 	segDur := job.Output.SegmentDuration
 	if segDur == 0 {

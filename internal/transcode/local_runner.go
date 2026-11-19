@@ -16,8 +16,24 @@ import (
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
 	"github.com/OpenListTeam/OpenList/v4/internal/setting"
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/v4l2m2m"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 )
+
+// detectV4L2M2M 可在测试中替换，避免依赖本机设备
+var detectV4L2M2M = v4l2m2m.Detect
+
+// hardwareSession 报告该 job 的 ffmpeg 是否会打开 V4L2 M2M 设备。
+// 与 buildFFmpegArgsCommon 的选择逻辑保持一致：只有解码器和编码器都
+// 回退到软件时才算纯 CPU 任务。设备探测结果有缓存，不会重复打开设备。
+func hardwareSession(job *Job, profile Profile) bool {
+	if !strings.EqualFold(profile.HWAccel, string(HWV4L2M2M)) {
+		return false
+	}
+	caps := detectV4L2M2M()
+	return caps.Decoder(job.Probe.VideoCodec, job.Probe.PixFmt, job.Probe.Width, job.Probe.Height) != "" ||
+		caps.Encoder(profile.VideoCodec) != ""
+}
 
 // limitedBuffer 是一个有容量上限的 io.Writer，超出 maxSize 后静默丢弃。
 // 用于捕获 ffmpeg stderr，防止异常文件导致无限内存增长。
@@ -83,6 +99,13 @@ func (r *LocalRunner) Start() error {
 	}, true)
 	r.workerID = w.ID
 	utils.Log.Infof("[transcode] local worker started: id=%s capacity=%d hwaccel=%s", w.ID, concurrency, hwaccel)
+	if strings.EqualFold(hwaccel, string(HWV4L2M2M)) {
+		if caps := detectV4L2M2M(); caps.Empty() {
+			utils.Log.Warnf("[transcode] v4l2m2m: no V4L2 M2M codec device found, using CPU codecs (in Docker, pass the /dev/video* devices to the container)")
+		} else {
+			utils.Log.Infof("[transcode] v4l2m2m: %s", caps)
+		}
+	}
 
 	for i := 0; i < concurrency; i++ {
 		r.wg.Add(1)
@@ -530,6 +553,10 @@ func buildFFmpegChunkArgs(job *Job, profile Profile, segDur int, startTime, dura
 func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath string) []string {
 	hw := strings.ToLower(profile.HWAccel)
 	args := []string{"-y", "-loglevel", "warning"}
+	var v4l2 v4l2m2m.Caps
+	if hw == string(HWV4L2M2M) {
+		v4l2 = detectV4L2M2M()
+	}
 
 	// 输入侧硬件加速
 	switch hw {
@@ -547,29 +574,62 @@ func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, dur
 		args = append(args, "-hwaccel", "auto")
 	}
 
+	// V4L2 M2M 解码器不属于 -hwaccel，要在 -i 之前按源编码点名；设备不支持该源时软解
+	decoder := v4l2.Decoder(job.Probe.VideoCodec, job.Probe.PixFmt, job.Probe.Width, job.Probe.Height)
+	// 硬解的 chunk 保留源时间戳，原因见下
+	copyTS := decoder != "" && startTime > 0.001
+
 	// 【chunk 模式】input seek：放在 -i 之前，速度快，会按关键帧对齐
 	// 注意 -ss 在 -i 之前是 input seek（用容器索引快速跳转），但落点是关键帧；
 	// 我们通过 force_key_frames 保证每个 chunk 边界都有关键帧，所以这里精度足够。
 	if startTime > 0.001 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", startTime))
 	}
+	// 默认 input seek 把落点记为 0，落点前那几帧的 pts 是负数。FFmpeg 把负 pts
+	// 交给 V4L2 时拆出负的微秒，内核按无符号换算成纳秒，这些帧的时间戳因此
+	// 往后错 2^32 纳秒（32 位内核）或 2^32 微秒（64 位内核），trim 丢不掉，
+	// 输出时间戳倒退，muxer 等音频时扣住编码器的全部输出缓冲，转码卡死。
+	// -copyts 让解码器只收到非负的源时间戳；-start_at_zero 像默认路径一样把
+	// 源起点归零，于是输出时间戳直接从 startTime 开始，不再需要 -output_ts_offset。
+	if copyTS {
+		args = append(args, "-copyts", "-start_at_zero")
+	}
 
 	// 输入：先限定协议白名单（输入选项，必须在 -i 之前），再指定输入
 	args = append(args, "-protocol_whitelist", ProtocolWhitelistFor(job.SourceURL))
+	if decoder != "" {
+		args = append(args, "-c:v", decoder)
+	}
 	args = append(args, "-i", job.SourceURL)
 
 	// 【chunk 模式】限定时长（output side 更精确）
 	if duration > 0.001 {
-		args = append(args, "-t", fmt.Sprintf("%.3f", duration))
+		if copyTS {
+			// -copyts 下输出端的 -t 也按源时间戳计，会在 duration 处而不是
+			// startTime+duration 处截止；改用 -to 给出结束位置
+			args = append(args, "-to", fmt.Sprintf("%.3f", startTime+duration))
+		} else {
+			args = append(args, "-t", fmt.Sprintf("%.3f", duration))
+		}
 	}
 
 	// 视频编码器
 	vcodec := pickEncoder(profile.VideoCodec, hw)
+	// V4L2 M2M 编码器同样按设备声明来选，设备编不了该格式时回退软件编码
+	if enc := v4l2.Encoder(profile.VideoCodec); enc != "" {
+		vcodec = enc
+	}
 	args = append(args, "-c:v", vcodec)
-	// 【关键】强制浏览器兼容的 profile/level/pix_fmt，必须与 master.m3u8 声明的
-	// CODECS="avc1.640028" (H.264 High Profile Level 4.0) 一致，否则 HLS.js 会触发
-	// bufferAppendError 死循环。
-	if strings.Contains(vcodec, "264") {
+	switch {
+	case strings.HasSuffix(vcodec, "_v4l2m2m"):
+		// V4L2 M2M 编码器只收设备支持的原始格式，NV12 最通用，也正是硬解输出的格式。
+		// 它不认 -profile:v high 这类名字（FFmpeg 直接报错退出），8-bit 4:2:0 输入
+		// 也不会产出浏览器解不了的 profile，profile 交给设备决定。
+		args = append(args, "-pix_fmt", "nv12")
+	case strings.Contains(vcodec, "264"):
+		// 【关键】强制浏览器兼容的 profile/level/pix_fmt，必须与 master.m3u8 声明的
+		// CODECS="avc1.640028" (H.264 High Profile Level 4.0) 一致，否则 HLS.js 会触发
+		// bufferAppendError 死循环。
 		args = append(args, "-profile:v", "high", "-level:v", "4.0", "-pix_fmt", "yuv420p")
 	}
 	if profile.VideoBitrate != "" {
@@ -587,7 +647,9 @@ func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, dur
 			args = append(args, "-vf", "scale="+profile.Scale)
 		}
 	}
-	args = append(args, "-preset", defaultPresetFor(vcodec))
+	if preset := defaultPresetFor(vcodec); preset != "" {
+		args = append(args, "-preset", preset)
+	}
 
 	// 音频
 	// 【关键修复】不能使用 -c:a copy，因为浏览器 MSE 不支持 AC3/DTS/EAC3/TrueHD 等
@@ -606,7 +668,8 @@ func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, dur
 	// 强制立体声 + 48kHz，避免 5.1 声道 / 高采样率导致的兼容问题
 	args = append(args, "-ac", "2", "-ar", "48000")
 	// 只输出音视频。源里有字幕时默认映射会带上一路字幕：播放端用不到，muxer
-	// 还要为交错攒约 10 秒的包等字幕，首切片明显变慢。
+	// 还要为交错攒约 10 秒的包等字幕，首切片明显变慢；V4L2 M2M 编码器的输出包
+	// 引用设备缓冲，被攒住时转码直接卡死。
 	args = append(args, "-sn", "-dn")
 
 	// HLS 输出
@@ -628,7 +691,7 @@ func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, dur
 	// 这会导致 chunk-30 的切片在播放器看来是 PTS=0~60s（而不是 1800~1860s），
 	// 进而触发 HLS.js bufferAppendError 或时间轴错位。
 	// 解决方法：用 -output_ts_offset 让生成的切片时间戳偏移到原始位置。
-	if startTime > 0.001 {
+	if startTime > 0.001 && !copyTS {
 		args = append(args, "-output_ts_offset", fmt.Sprintf("%.3f", startTime))
 	}
 	args = append(args,
@@ -706,6 +769,9 @@ func defaultPresetFor(encoder string) string {
 	if strings.Contains(encoder, "videotoolbox") {
 		return "medium"
 	}
+	if strings.HasSuffix(encoder, "_v4l2m2m") {
+		return "" // V4L2 M2M 编码器没有 preset 选项
+	}
 	return "veryfast"
 }
 
@@ -725,7 +791,7 @@ func ProbeSource(url string) (SourceProbe, error) {
 	args := []string{
 		"-v", "error",
 		"-protocol_whitelist", ProtocolWhitelistFor(url),
-		"-show_entries", "format=duration,size,bit_rate:stream=codec_type,codec_name,bit_rate,width,height",
+		"-show_entries", "format=duration,size,bit_rate:stream=codec_type,codec_name,bit_rate,width,height,pix_fmt",
 		"-of", "json",
 		url,
 	}
@@ -751,6 +817,7 @@ func ProbeSource(url string) (SourceProbe, error) {
 			BitRate   string `json:"bit_rate"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
+			PixFmt    string `json:"pix_fmt"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
@@ -764,6 +831,7 @@ func ProbeSource(url string) (SourceProbe, error) {
 			p.VideoCodec = s.CodecName
 			p.Width = s.Width
 			p.Height = s.Height
+			p.PixFmt = s.PixFmt
 			p.VideoBitrate, _ = strconv.ParseInt(s.BitRate, 10, 64)
 		}
 		if s.CodecType == "audio" && p.AudioCodec == "" {

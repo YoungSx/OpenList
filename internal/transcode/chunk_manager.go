@@ -16,6 +16,7 @@ package transcode
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,9 +51,12 @@ type Chunk struct {
 	LastAccess time.Time
 	Error      string
 
-	cancel    context.CancelFunc // ffmpeg 进程的 cancel
-	doneCh    chan struct{}      // ffmpeg 进程结束时关闭
-	doneOnce  sync.Once
+	cancel   context.CancelFunc // ffmpeg 进程的 cancel
+	doneCh   chan struct{}      // ffmpeg 进程结束时关闭
+	doneOnce sync.Once
+	// gen 每次启动自增。被 kill 的 chunk 可以立刻被重新启动，旧进程
+	// 退出得晚，只有和当前 gen 相同的进程才允许回写状态。
+	gen int
 }
 
 // chunkDoneClose 关闭 doneCh（幂等）
@@ -66,18 +70,25 @@ func (c *Chunk) chunkDoneClose() {
 
 // ChunkSession 单个 (jobID, profile) 下的 chunk 调度上下文
 type ChunkSession struct {
-	JobID    string
-	Profile  string
-	Job      *Job
-	ProfDef  Profile
+	JobID   string
+	Profile string
+	Job     *Job
+	ProfDef Profile
 
 	// 静态参数
 	TotalDuration float64 // 视频总时长
 	SegDur        int     // 每片时长（秒）
 	ChunkDur      int     // 每个 chunk 时长（秒）
-	MaxConcurrent int     // 最大并发 chunk 数
+	MaxConcurrent int     // 最大并发 chunk 数（硬件设备会话固定为 1）
 	IdleSec       int     // chunk 空闲多久就 kill
 	Prefetch      bool    // 是否启用预读
+
+	// HW 为 true 时该会话的 ffmpeg 会打开 V4L2 M2M 设备。这类设备同一时刻
+	// 只允许一个进程使用，所以整个会话经 ChunkManager.deviceMu 串行，且
+	// 预读只能是"上一段转完立即启动下一段"。
+	HW         bool
+	FFmpegPath string
+	Timeout    time.Duration
 
 	mu     sync.Mutex
 	chunks map[int]*Chunk // chunkIndex -> Chunk
@@ -103,6 +114,11 @@ type ChunkManager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*ChunkSession // key = jobID + ":" + profile
+
+	// deviceMu 在硬件 chunk 的整个 ffmpeg 生命周期内持有。V4L2 M2M 驱动
+	// 同一时刻只允许一个进程打开设备，后启动的 chunk 在这里等到前一个
+	// 进程退出、设备释放后才继续，跨 session 同样生效。
+	deviceMu sync.Mutex
 
 	stopCh chan struct{}
 }
@@ -149,6 +165,15 @@ func (cm *ChunkManager) StartSession(job *Job, profile Profile, outDir string) (
 		idleSec = 60
 	}
 	prefetch := setting.GetBool(conf.TranscodeChunkPrefetch)
+	hw := hardwareSession(job, profile)
+	if hw {
+		// 设备只有一路，多个 chunk 并发只会互相抢设备。
+		maxConc = 1
+	}
+	timeoutMin := setting.GetInt(conf.TranscodeJobTimeoutMin, 120)
+	if timeoutMin <= 0 {
+		timeoutMin = 120
+	}
 
 	s := &ChunkSession{
 		JobID:         job.ID,
@@ -161,6 +186,9 @@ func (cm *ChunkManager) StartSession(job *Job, profile Profile, outDir string) (
 		MaxConcurrent: maxConc,
 		IdleSec:       idleSec,
 		Prefetch:      prefetch,
+		HW:            hw,
+		FFmpegPath:    setting.GetStr(conf.TranscodeFFmpegPath, "ffmpeg"),
+		Timeout:       time.Duration(timeoutMin) * time.Minute,
 		chunks:        make(map[int]*Chunk),
 		allDoneCh:     make(chan struct{}),
 		OutDir:        outDir,
@@ -211,8 +239,8 @@ func (cm *ChunkManager) StartSession(job *Job, profile Profile, outDir string) (
 	// 启动后台维护协程：空闲清理 + 完成检测
 	go cm.sessionLoop(s)
 
-	utils.Log.Infof("[transcode][chunk] session started job=%s profile=%s totalDur=%.1fs chunkDur=%ds chunks=%d maxConc=%d",
-		job.ID, profile.Name, totalDur, chunkDur, chunkCount, maxConc)
+	utils.Log.Infof("[transcode][chunk] session started job=%s profile=%s totalDur=%.1fs chunkDur=%ds chunks=%d maxConc=%d hw=%v",
+		job.ID, profile.Name, totalDur, chunkDur, chunkCount, maxConc, hw)
 	return s, nil
 }
 
@@ -294,20 +322,41 @@ func (cm *ChunkManager) ensureChunk(s *ChunkSession, idx int) {
 		}
 		victim.State = ChunkKilled
 	}
-	// 启动 chunk ffmpeg
+	// 启动 chunk ffmpeg。ctx 在这里创建而不是在 runChunk 里，这样
+	// 状态变为 Running 的同时 cancel 已就绪，LRU/空闲 kill 不会扑空。
+	ctx, cancel := context.WithTimeout(context.Background(), s.Timeout)
+	c.gen++
+	gen := c.gen
 	c.State = ChunkRunning
 	c.StartedAt = now
+	c.cancel = cancel
 	c.doneCh = make(chan struct{})
 	c.doneOnce = sync.Once{}
 	s.mu.Unlock()
 
 	utils.Log.Infof("[transcode][chunk] ensureChunk: launching chunk %d (job=%s prevState=%v running=%d)",
 		idx, s.JobID, prevState, running)
-	go cm.runChunk(s, idx)
+	go cm.runChunk(ctx, cancel, s, idx, gen)
+}
+
+// runProcess 执行一次 ffmpeg。测试替换它来观察调度顺序。
+var runProcess = func(ctx context.Context, path string, args []string, stderr io.Writer) error {
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Stderr = stderr
+	return cmd.Run()
 }
 
 // runChunk 实际启动 ffmpeg 转码该 chunk
-func (cm *ChunkManager) runChunk(s *ChunkSession, idx int) {
+func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc, s *ChunkSession, idx, gen int) {
+	defer cancel()
+
+	if s.HW {
+		// 设备同一时刻只给一个进程。这里阻塞到前一个硬件 ffmpeg 退出，
+		// 拖动抢占时新 chunk 就是靠这行等旧进程让出 /dev/video*。
+		cm.deviceMu.Lock()
+		defer cm.deviceMu.Unlock()
+	}
+
 	s.mu.Lock()
 	c := s.chunks[idx]
 	s.mu.Unlock()
@@ -315,12 +364,16 @@ func (cm *ChunkManager) runChunk(s *ChunkSession, idx int) {
 		return
 	}
 
-	timeoutMin := setting.GetInt(conf.TranscodeJobTimeoutMin, 120)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMin)*time.Minute)
-	s.mu.Lock()
-	c.cancel = cancel
-	s.mu.Unlock()
-	defer cancel()
+	if ctx.Err() != nil {
+		// 排队等设备期间被抢占，不必再启动 ffmpeg
+		s.mu.Lock()
+		if c.gen == gen {
+			c.State = ChunkKilled
+			c.chunkDoneClose()
+		}
+		s.mu.Unlock()
+		return
+	}
 
 	segPattern := filepath.Join(s.OutDir, "seg-%d.ts")
 	// 每个 chunk 写自己的 playlist 文件，防止互相覆盖；后端不读这个 playlist 用于响应，
@@ -328,22 +381,25 @@ func (cm *ChunkManager) runChunk(s *ChunkSession, idx int) {
 	chunkPlaylist := filepath.Join(s.OutDir, fmt.Sprintf("_chunk_%d.m3u8", idx))
 
 	args := buildFFmpegChunkArgs(s.Job, s.ProfDef, s.SegDur, c.StartTime, c.Duration, c.StartSeq, segPattern, chunkPlaylist)
-	ffmpegPath := setting.GetStr(conf.TranscodeFFmpegPath, "ffmpeg")
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	stderr := &limitedBuffer{maxSize: 32 * 1024}
-	cmd.Stderr = stderr
 
 	utils.Log.Infof("[transcode][chunk] start ffmpeg job=%s chunk=%d ss=%.1f t=%.1f startSeq=%d",
 		s.JobID, idx, c.StartTime, c.Duration, c.StartSeq)
 
 	startedAt := time.Now()
-	err := cmd.Run()
+	err := runProcess(ctx, s.FFmpegPath, args, stderr)
 	elapsed := time.Since(startedAt)
 
 	s.mu.Lock()
+	if c.gen != gen {
+		// 该 chunk 已被重新启动，状态属于新进程，这里只收尾
+		s.mu.Unlock()
+		utils.Log.Infof("[transcode][chunk] chunk %d superseded (job=%s elapsed=%.1fs)", idx, s.JobID, elapsed.Seconds())
+		return
+	}
 	switch {
 	case ctx.Err() != nil && c.State == ChunkKilled:
-		// 被 LRU 主动 kill，状态保持 Killed
+		// 被 LRU/空闲/拖动主动 kill，状态保持 Killed
 		utils.Log.Infof("[transcode][chunk] chunk %d killed (job=%s elapsed=%.1fs)", idx, s.JobID, elapsed.Seconds())
 	case err != nil:
 		c.State = ChunkFailed
@@ -401,27 +457,47 @@ func (cm *ChunkManager) maintainSession(s *ChunkSession) {
 			c.State = ChunkKilled
 		}
 	}
-	// 2. 预读：找出最近被访问的 Running chunk，如果它的进度过半，启动下一个 chunk
+	// 2. 预读
+	//    硬件会话：设备只有一路，并发没有意义，改成"当前段转完立即启动下一段"。
+	//    软件会话：最近被访问的 Running chunk 进度过半时提前启动下一个。
 	var prefetchTarget = -1
 	if s.Prefetch {
-		var hottestIdx = -1
-		var hottestAccess time.Time
-		for i, c := range s.chunks {
-			if c.State == ChunkRunning && c.LastAccess.After(hottestAccess) {
-				hottestAccess = c.LastAccess
-				hottestIdx = i
+		if s.HW {
+			// 最近访问的 chunk 就是播放位置；它还没转完（或正被拖动抢占）时不预读
+			var latest *Chunk
+			for _, c := range s.chunks {
+				if c.State == ChunkIdle {
+					continue
+				}
+				if latest == nil || c.LastAccess.After(latest.LastAccess) {
+					latest = c
+				}
 			}
-		}
-		if hottestIdx >= 0 {
-			hot := s.chunks[hottestIdx]
-			// 估算进度：用 ffmpeg 已经写出的切片数 / 该 chunk 总切片数
-			// 由于 cache.segments 是全局的，我们检查范围 [StartSeq, EndSeq) 中已就绪数量
-			done := cm.countReadySegments(s, hot.StartSeq, hot.EndSeq)
-			expected := hot.EndSeq - hot.StartSeq
-			if expected > 0 && done*2 >= expected { // 进度 >= 50%
-				next := hottestIdx + 1
-				if nc, ok := s.chunks[next]; ok && nc.State == ChunkIdle {
-					prefetchTarget = next
+			if latest != nil && latest.State == ChunkDone {
+				if nc, ok := s.chunks[latest.Index+1]; ok && nc.State == ChunkIdle {
+					prefetchTarget = nc.Index
+				}
+			}
+		} else {
+			var hottestIdx = -1
+			var hottestAccess time.Time
+			for i, c := range s.chunks {
+				if c.State == ChunkRunning && c.LastAccess.After(hottestAccess) {
+					hottestAccess = c.LastAccess
+					hottestIdx = i
+				}
+			}
+			if hottestIdx >= 0 {
+				hot := s.chunks[hottestIdx]
+				// 估算进度：用 ffmpeg 已经写出的切片数 / 该 chunk 总切片数
+				// 由于 cache.segments 是全局的，我们检查范围 [StartSeq, EndSeq) 中已就绪数量
+				done := cm.countReadySegments(s, hot.StartSeq, hot.EndSeq)
+				expected := hot.EndSeq - hot.StartSeq
+				if expected > 0 && done*2 >= expected { // 进度 >= 50%
+					next := hottestIdx + 1
+					if nc, ok := s.chunks[next]; ok && nc.State == ChunkIdle {
+						prefetchTarget = next
+					}
 				}
 			}
 		}
