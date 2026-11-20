@@ -356,11 +356,12 @@ func (c *Cache) MasterPlaylist(profiles []Profile, baseURL string) string {
 	for _, p := range profiles {
 		bw, _ := parseBitrate(p.VideoBitrate)
 		ab, _ := parseBitrate(p.AudioBitrate)
-		// 【关键修复】根据实际编码动态生成 codec 字符串
-		// 错误的 codec 声明会导致 HLS.js 用错误参数初始化 SourceBuffer
-		// 然后 appendBuffer 时数据格式不匹配 → bufferAppendError 死循环
-		codecs := buildCodecString(p)
-		b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=\"%s\"\n", bw+ab, codecs))
+		if strings.EqualFold(p.HWAccel, string(HWV4L2M2M)) {
+			// V4L2 controls the actual profile; omit the optional CODECS until known.
+			b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d\n", bw+ab))
+		} else {
+			b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=\"%s\"\n", bw+ab, buildCodecString(p)))
+		}
 		b.WriteString(fmt.Sprintf("%s%s/playlist.m3u8\n", baseURL, p.Name))
 	}
 	return b.String()

@@ -83,8 +83,8 @@ type ChunkSession struct {
 	IdleSec       int     // chunk 空闲多久就 kill
 	Prefetch      bool    // 是否启用预读
 
-	// HW 为 true 时该会话选择 V4L2 M2M（设备不可用时可能回退软件）。这类设备同一时刻
-	// 只允许一个进程使用，所以整个会话经 ChunkManager.deviceMu 串行，且
+	// HW 为 true 时该会话选择 V4L2 M2M（设备不可用时可能回退软件）。为兼容独占设备，
+	// FFmpeg 通过 ChunkManager.deviceSlot 串行，且
 	// 预读只能是"上一段转完立即启动下一段"。
 	HW         bool
 	FFmpegPath string
@@ -115,10 +115,9 @@ type ChunkManager struct {
 	mu       sync.Mutex
 	sessions map[string]*ChunkSession // key = jobID + ":" + profile
 
-	// deviceMu 在硬件 chunk 的整个 ffmpeg 生命周期内持有。V4L2 M2M 驱动
-	// 同一时刻只允许一个进程打开设备，后启动的 chunk 在这里等到前一个
-	// 进程退出、设备释放后才继续，跨 session 同样生效。
-	deviceMu sync.Mutex
+	// 独占编解码设备由整个 FFmpeg 生命周期持有；整段和分块路径
+	// 共用此许可，排队中的请求可随 context 取消。
+	deviceSlot chan struct{}
 
 	stopCh chan struct{}
 }
@@ -126,11 +125,27 @@ type ChunkManager struct {
 // NewChunkManager 创建实例
 func NewChunkManager(mgr *Manager) *ChunkManager {
 	return &ChunkManager{
-		mgr:      mgr,
-		sessions: make(map[string]*ChunkSession),
-		stopCh:   make(chan struct{}),
+		mgr:        mgr,
+		sessions:   make(map[string]*ChunkSession),
+		deviceSlot: make(chan struct{}, 1),
+		stopCh:     make(chan struct{}),
 	}
 }
+
+func (cm *ChunkManager) acquireDevice(ctx context.Context) bool {
+	select {
+	case cm.deviceSlot <- struct{}{}:
+		if ctx.Err() == nil {
+			return true
+		}
+		<-cm.deviceSlot
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (cm *ChunkManager) releaseDevice() { <-cm.deviceSlot }
 
 func sessionKey(jobID, profile string) string { return jobID + ":" + profile }
 
@@ -353,8 +368,9 @@ func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc,
 	if s.HW {
 		// 设备同一时刻只给一个进程。这里阻塞到前一个硬件 ffmpeg 退出，
 		// 拖动抢占时新 chunk 就是靠这行等旧进程让出 /dev/video*。
-		cm.deviceMu.Lock()
-		defer cm.deviceMu.Unlock()
+		if cm.acquireDevice(ctx) {
+			defer cm.releaseDevice()
+		}
 	}
 
 	s.mu.Lock()
@@ -380,7 +396,7 @@ func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc,
 	// 真正的总 playlist 由 cache.BuildPlaylist 根据总时长生成。
 	chunkPlaylist := filepath.Join(s.OutDir, fmt.Sprintf("_chunk_%d.m3u8", idx))
 
-	args := buildFFmpegChunkArgs(s.Job, s.ProfDef, s.SegDur, c.StartTime, c.Duration, c.StartSeq, segPattern, chunkPlaylist)
+	args := buildFFmpegChunkArgs(s.Job, s.ProfDef, s.SegDur, c.StartTime, c.Duration, c.StartSeq, segPattern, chunkPlaylist, s.FFmpegPath)
 	stderr := &limitedBuffer{maxSize: 32 * 1024}
 
 	utils.Log.Infof("[transcode][chunk] start ffmpeg job=%s chunk=%d ss=%.1f t=%.1f startSeq=%d",

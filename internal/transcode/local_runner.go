@@ -257,21 +257,22 @@ func (r *LocalRunner) runJobByChunks(ctx context.Context, job *Job, profile Prof
 
 // runJobLegacy 旧路径：一次性整段转码（不知道总时长时回退使用）
 func (r *LocalRunner) runJobLegacy(ctx context.Context, job *Job, profile Profile, outDir string) {
+	if hardwareSession(job, profile) {
+		if !r.mgr.Chunks.acquireDevice(ctx) {
+			_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobCancelled, Error: "cancelled while waiting for codec device"})
+			return
+		}
+		defer r.mgr.Chunks.releaseDevice()
+	}
 	playlistPath := filepath.Join(outDir, "playlist.m3u8")
 	segPattern := filepath.Join(outDir, "seg-%d.ts")
 
-	args := buildFFmpegArgs(job, profile, segPattern, playlistPath)
 	ffmpegPath := setting.GetStr(conf.TranscodeFFmpegPath, "ffmpeg")
+	args := buildFFmpegArgs(job, profile, segPattern, playlistPath)
 
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	stderr := &limitedBuffer{maxSize: 64 * 1024}
-	cmd.Stderr = stderr
 
 	startedAt := time.Now()
-	if err := cmd.Start(); err != nil {
-		_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFailed, Error: err.Error()})
-		return
-	}
 
 	stopWatcher := make(chan struct{})
 	var watcherWG sync.WaitGroup
@@ -281,7 +282,7 @@ func (r *LocalRunner) runJobLegacy(ctx context.Context, job *Job, profile Profil
 		r.watchSegments(job, profile, outDir, stopWatcher)
 	}()
 
-	err := cmd.Wait()
+	err := runProcess(ctx, ffmpegPath, args, stderr)
 	close(stopWatcher)
 	watcherWG.Wait()
 	r.scanAndPublish(job, profile, outDir, true)

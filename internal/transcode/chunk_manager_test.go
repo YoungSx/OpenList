@@ -9,6 +9,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/OpenListTeam/OpenList/v4/internal/conf"
+	"github.com/OpenListTeam/OpenList/v4/internal/model"
+	"github.com/OpenListTeam/OpenList/v4/internal/op"
 )
 
 // testSession 构造一个不依赖 setting/db 的 session，每个 chunk 10 片
@@ -74,6 +78,86 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+}
+
+func TestDeviceWaitCanBeCancelled(t *testing.T) {
+	cm := NewChunkManager(nil)
+	if !cm.acquireDevice(context.Background()) {
+		t.Fatal("first device acquisition failed")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan bool, 1)
+	go func() { result <- cm.acquireDevice(ctx) }()
+	cancel()
+	select {
+	case acquired := <-result:
+		if acquired {
+			t.Fatal("cancelled request acquired busy device")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled request kept waiting for busy device")
+	}
+	cm.releaseDevice()
+	if !cm.acquireDevice(context.Background()) {
+		t.Fatal("device was not released")
+	}
+	cm.releaseDevice()
+}
+
+func TestLegacyAndChunkUseSameDeviceSlot(t *testing.T) {
+	for key, value := range map[string]string{
+		conf.TranscodeFFmpegPath: "ffmpeg", conf.TranscodeSegmentDuration: "6",
+	} {
+		op.Cache.SetSetting(key, &model.SettingItem{Key: key, Value: value})
+	}
+	t.Cleanup(op.Cache.ClearAll)
+	withV4L2M2M(t, s805)
+	manager := &Manager{Scheduler: NewScheduler(NewWorkerRegistry()), Cache: NewCache(t.TempDir(), 1)}
+	manager.Chunks = NewChunkManager(nil)
+	runner := NewLocalRunner(manager)
+	job := manager.Scheduler.Submit(NewJob())
+	job.SourceURL = "/tmp/movie.mkv"
+	job.Probe = SourceProbe{VideoCodec: "h264", PixFmt: "yuv420p", Width: 1920, Height: 1080}
+	profile := Profile{Name: "test", VideoCodec: "h264", HWAccel: "v4l2m2m"}
+	chunk := testSession(t, 1)
+	entered := make(chan string, 2)
+	exitLegacy := make(chan struct{})
+	previous := runProcess
+	runProcess = func(_ context.Context, _ string, args []string, _ io.Writer) error {
+		name := filepath.Base(args[len(args)-1])
+		entered <- name
+		if name == "playlist.m3u8" {
+			<-exitLegacy
+		}
+		return nil
+	}
+	t.Cleanup(func() { runProcess = previous })
+	legacyDone := make(chan struct{})
+	dir := t.TempDir()
+	go func() {
+		runner.runJobLegacy(context.Background(), job, profile, dir)
+		close(legacyDone)
+	}()
+	if got := <-entered; got != "playlist.m3u8" {
+		t.Fatalf("unexpected first process: %s", got)
+	}
+	manager.Chunks.ensureChunk(chunk, 0)
+	select {
+	case <-entered:
+		t.Fatal("chunk started while legacy process held the device")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(exitLegacy)
+	select {
+	case name := <-entered:
+		if name != "_chunk_0.m3u8" {
+			t.Fatalf("unexpected next process: %s", name)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("chunk did not start after legacy process exited")
+	}
+	<-legacyDone
+	waitFor(t, "chunk done", func() bool { return chunkState(chunk, 0) == ChunkDone })
 }
 
 // 硬件会话：拖动到下一段时旧进程被抢占，但要等它退出、设备释放后才能启动
