@@ -3,6 +3,7 @@
 package v4l2m2m
 
 import (
+	"encoding/binary"
 	"path/filepath"
 	"unsafe"
 
@@ -71,13 +72,13 @@ func (platform) id(path string) (uint64, bool) {
 	if unix.Stat(path, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFCHR {
 		return 0, false
 	}
-	return uint64(st.Rdev), true
+	return st.Ino, true
 }
 
 // scan 读取一个 M2M 设备的压缩格式：解码设备在 OUTPUT 队列接收压缩流，
 // 编码设备在 CAPTURE 队列产出压缩流。不是 M2M 的设备（摄像头等）返回空能力。
 func (platform) scan(path string) (Caps, error) {
-	caps := Caps{Decode: map[string]Size{}, Encode: map[string]bool{}}
+	caps := Caps{Decode: map[string]Size{}, Encode: map[string]Size{}}
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return caps, err
@@ -104,8 +105,17 @@ func (platform) scan(path string) (Caps, error) {
 	for _, f := range compressedFormats(fd, output) {
 		caps.Decode[fourcc(f)] = maxSize(fd, f)
 	}
-	for _, f := range compressedFormats(fd, capture) {
-		caps.Encode[fourcc(f)] = true
+	// The FFmpeg path below explicitly supplies NV12. Skip encoders whose
+	// raw OUTPUT queue cannot accept it, even if CAPTURE advertises H.264.
+	if acceptsNV12(fd, output) {
+		rawLimit := rawMaxSize(fd, output)
+		for _, f := range compressedFormats(fd, capture) {
+			limit := maxSize(fd, f)
+			if limit.Width == 0 || limit.Height == 0 {
+				limit = rawLimit
+			}
+			caps.Encode[fourcc(f)] = limit
+		}
 	}
 	return caps, nil
 }
@@ -141,11 +151,49 @@ func maxSize(fd int, pixFmt uint32) Size {
 		if e.Type != frmsizeTypeDiscrete {
 			return Size{Width: e.Size[1], Height: e.Size[4]}
 		}
-		s.Width = max(s.Width, e.Size[0])
-		s.Height = max(s.Height, e.Size[1])
+		candidate := Size{Width: e.Size[0], Height: e.Size[1]}
+		if i == 0 || wider(candidate, s) {
+			s = candidate
+		}
 	}
 }
 
 func fourcc(f uint32) string {
 	return string([]byte{byte(f), byte(f >> 8), byte(f >> 16), byte(f >> 24)})
+}
+
+func acceptsNV12(fd int, bufType uint32) bool {
+	for i := uint32(0); ; i++ {
+		d := v4l2Fmtdesc{Index: i, Type: bufType}
+		if ioctl(fd, vidiocEnumFmt, unsafe.Pointer(&d)) != nil {
+			return false
+		}
+		if f := fourcc(d.PixelFormat); f == "NV12" || f == "NM12" {
+			return true
+		}
+	}
+}
+
+// The v4l2_format union is pointer-aligned (208 bytes on 64-bit, 204 on 32-bit).
+// pix and pix_mp share the first width/height/pixelformat words.
+type v4l2Format struct {
+	Type uint32
+	_    [unsafe.Sizeof(uintptr(0)) - 4]byte
+	Data [200]byte
+}
+
+func rawMaxSize(fd int, bufType uint32) Size {
+	format := v4l2Format{Type: bufType}
+	raw := "NV12"
+	if bufType == bufTypeVideoOutputMplane {
+		raw = "NM12"
+	}
+	binary.NativeEndian.PutUint32(format.Data[0:4], ^uint32(0))
+	binary.NativeEndian.PutUint32(format.Data[4:8], ^uint32(0))
+	copy(format.Data[8:12], raw)
+	request := uintptr(0xc0005640) | unsafe.Sizeof(format)<<16 // VIDIOC_TRY_FMT
+	if ioctl(fd, request, unsafe.Pointer(&format)) != nil {
+		return Size{}
+	}
+	return Size{Width: binary.NativeEndian.Uint32(format.Data[0:4]), Height: binary.NativeEndian.Uint32(format.Data[4:8])}
 }

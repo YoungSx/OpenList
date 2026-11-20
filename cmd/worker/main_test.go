@@ -24,7 +24,7 @@ func workerArgs(t *testing.T, caps v4l2m2m.Caps, hw, codec, pixFmt string) []str
 func TestBuildFFmpegArgsV4L2M2M(t *testing.T) {
 	caps := v4l2m2m.Caps{
 		Decode: map[string]v4l2m2m.Size{"HEVC": {Width: 1920, Height: 1088}},
-		Encode: map[string]bool{"H264": true},
+		Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1088}},
 	}
 	args := workerArgs(t, caps, "v4l2m2m", "hevc", "yuv420p")
 	in := slices.Index(args, "-i")
@@ -52,5 +52,14 @@ func TestBuildFFmpegArgsV4L2M2MFallback(t *testing.T) {
 	}
 	if i := slices.Index(args, "libx264"); i < 1 || args[i-1] != "-c:v" {
 		t.Errorf("no CPU encoder: %v", args)
+	}
+}
+
+func TestV4L2WorkerCapacity(t *testing.T) {
+	if got := workerCapacity("v4l2m2m", 4); got != 1 {
+		t.Fatalf("hardware worker capacity %d", got)
+	}
+	if got := workerCapacity("none", 4); got != 4 {
+		t.Fatalf("software worker capacity %d", got)
 	}
 }

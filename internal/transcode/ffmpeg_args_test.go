@@ -11,7 +11,7 @@ import (
 // 一台 Amlogic S805：H.264/HEVC 硬解到 1080p，只能硬编 H.264
 var s805 = v4l2m2m.Caps{
 	Decode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}, "HEVC": {Width: 1920, Height: 1088}},
-	Encode: map[string]bool{"H264": true, "JPEG": true},
+	Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1088}, "JPEG": {Width: 1920, Height: 1088}},
 }
 
 func withV4L2M2M(t *testing.T, caps v4l2m2m.Caps) {

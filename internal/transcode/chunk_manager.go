@@ -83,7 +83,7 @@ type ChunkSession struct {
 	IdleSec       int     // chunk 空闲多久就 kill
 	Prefetch      bool    // 是否启用预读
 
-	// HW 为 true 时该会话的 ffmpeg 会打开 V4L2 M2M 设备。这类设备同一时刻
+	// HW 为 true 时该会话选择 V4L2 M2M（设备不可用时可能回退软件）。这类设备同一时刻
 	// 只允许一个进程使用，所以整个会话经 ChunkManager.deviceMu 串行，且
 	// 预读只能是"上一段转完立即启动下一段"。
 	HW         bool

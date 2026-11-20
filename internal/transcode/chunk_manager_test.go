@@ -174,3 +174,51 @@ func TestHWPefetchAfterDone(t *testing.T) {
 		t.Fatalf("started = %v, want [1]", started)
 	}
 }
+
+func TestHWDeviceWaitsForProcessExitAcrossSessions(t *testing.T) {
+	first, second := testSession(t, 1), testSession(t, 1)
+	second.JobID = "second"
+	cm := NewChunkManager(nil)
+	entered := make(chan struct{}, 2)
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	var calls int
+	previous := runProcess
+	runProcess = func(ctx context.Context, _ string, _ []string, _ io.Writer) error {
+		calls++ // guarded by the device lock
+		entered <- struct{}{}
+		if calls == 1 {
+			<-ctx.Done()
+			close(cancelled)
+			<-release // device is still owned until the process actually exits
+			return ctx.Err()
+		}
+		return nil
+	}
+	t.Cleanup(func() { runProcess = previous })
+	cm.ensureChunk(first, 0)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first process did not start")
+	}
+	cm.ensureChunk(second, 0)
+	cm.killAllChunks(first)
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first process did not observe cancellation")
+	}
+	select {
+	case <-entered:
+		t.Fatal("second session acquired the device before the first process exited")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second session did not acquire the released device")
+	}
+	waitFor(t, "second session done", func() bool { return chunkState(second, 0) == ChunkDone })
+}

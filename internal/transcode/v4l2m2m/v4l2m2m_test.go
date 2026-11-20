@@ -13,7 +13,7 @@ var s805 = Caps{
 		"HEVC": {1920, 1088},
 		"MPG2": {1920, 1080},
 	},
-	Encode: map[string]bool{"H264": true, "JPEG": true},
+	Encode: map[string]Size{"H264": {1920, 1088}, "JPEG": {1920, 1088}},
 }
 
 func TestDecoder(t *testing.T) {
@@ -49,11 +49,11 @@ func TestEncoder(t *testing.T) {
 		"hevc": "", // S805 编不了 HEVC，调用方回退软件编码
 		"av1":  "",
 	} {
-		if got := s805.Encoder(codec); got != want {
+		if got := s805.Encoder(codec, 1920, 1080, ""); got != want {
 			t.Errorf("Encoder(%q) = %q, want %q", codec, got, want)
 		}
 	}
-	if got := (Caps{Encode: map[string]bool{"HEVC": true}}).Encoder("h265"); got != "hevc_v4l2m2m" {
+	if got := (Caps{Encode: map[string]Size{"HEVC": {1920, 1088}}}).Encoder("h265", 1920, 1080, ""); got != "hevc_v4l2m2m" {
 		t.Errorf("Encoder(h265) = %q, want hevc_v4l2m2m", got)
 	}
 }
@@ -106,7 +106,7 @@ func (h *fakeHost) add(path string, id uint64, c Caps) {
 func TestDetectMergesDevices(t *testing.T) {
 	h := newFakeHost()
 	h.add("/dev/video0", 1, Caps{Decode: map[string]Size{"H264": {1920, 1080}, "HEVC": {1920, 1088}}})
-	h.add("/dev/video1", 2, Caps{Encode: map[string]bool{"H264": true}})
+	h.add("/dev/video1", 2, Caps{Encode: map[string]Size{"H264": {1920, 1088}}})
 	h.add("/dev/video2", 3, Caps{Decode: map[string]Size{"H264": {4096, 2304}}})
 	h.add("/dev/video3", 4, Caps{}) // 摄像头
 	got := (&registry{host: h, devices: map[string]device{}}).detect()
@@ -122,7 +122,7 @@ func TestDetectOpensKnownDevicesOnce(t *testing.T) {
 	h.add("/dev/video3", 4, Caps{})
 	r := &registry{host: h, devices: map[string]device{}}
 	for i := 0; i < 3; i++ {
-		if got := r.detect(); got.Encoder("h264") == "" {
+		if got := r.detect(); got.Encoder("h264", 1920, 1080, "") == "" {
 			t.Fatalf("detect() #%d lost the encoder: %s", i, got)
 		}
 	}
@@ -135,14 +135,14 @@ func TestDetectOpensKnownDevicesOnce(t *testing.T) {
 
 func TestDetectRetriesBusyDevice(t *testing.T) {
 	h := newFakeHost()
-	h.add("/dev/video1", 2, Caps{Encode: map[string]bool{"H264": true}})
+	h.add("/dev/video1", 2, Caps{Encode: map[string]Size{"H264": {1920, 1088}}})
 	h.busy["/dev/video1"] = true
 	r := &registry{host: h, devices: map[string]device{}}
 	if got := r.detect(); !got.Empty() {
 		t.Fatalf("busy device reported: %s", got)
 	}
 	h.busy["/dev/video1"] = false
-	if got := r.detect(); got.Encoder("h264") != "h264_v4l2m2m" {
+	if got := r.detect(); got.Encoder("h264", 1920, 1080, "") != "h264_v4l2m2m" {
 		t.Fatalf("device not picked up after it became free: %s", got)
 	}
 }
@@ -154,8 +154,8 @@ func TestDetectFollowsDeviceChanges(t *testing.T) {
 	r.detect()
 
 	// 驱动重新加载后同一节点换成了别的设备
-	h.add("/dev/video0", 7, Caps{Encode: map[string]bool{"HEVC": true}})
-	if got := r.detect(); got.Encoder("hevc") != "hevc_v4l2m2m" || got.Encoder("h264") != "" {
+	h.add("/dev/video0", 7, Caps{Encode: map[string]Size{"HEVC": {1920, 1088}}})
+	if got := r.detect(); got.Encoder("hevc", 1920, 1080, "") != "hevc_v4l2m2m" || got.Encoder("h264", 1920, 1080, "") != "" {
 		t.Errorf("replaced device not rescanned: %s", got)
 	}
 	if h.scans["/dev/video0"] != 2 {
@@ -165,5 +165,41 @@ func TestDetectFollowsDeviceChanges(t *testing.T) {
 	delete(h.ids, "/dev/video0")
 	if got := r.detect(); !got.Empty() {
 		t.Errorf("removed device still reported: %s", got)
+	}
+}
+
+func TestEncoderGeometry(t *testing.T) {
+	for _, tc := range []struct {
+		name, scale   string
+		width, height int
+		want          bool
+	}{
+		{"source 1080p", "", 1920, 1080, true},
+		{"source 4k", "", 3840, 2160, false},
+		{"downscale", "1920:-2", 3840, 2160, true},
+		{"portrait exceeds height", "1920:-2", 1080, 1920, false},
+		{"explicit size", "1280:720", 3840, 2160, true},
+		{"height scale", "-2:720", 3840, 2160, true},
+		{"unknown dimensions", "", 0, 0, false},
+		{"unknown expression", "min(1920,iw):-2", 3840, 2160, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := s805.Encoder("h264", tc.width, tc.height, tc.scale)
+			if (got != "") != tc.want {
+				t.Fatalf("Encoder=%q, hardware wanted=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMergeKeepsRealGeometry(t *testing.T) {
+	caps := Caps{Decode: map[string]Size{}, Encode: map[string]Size{}}
+	caps.add(Caps{Decode: map[string]Size{"H264": {1920, 1080}}})
+	caps.add(Caps{Decode: map[string]Size{"H264": {1080, 1920}}})
+	if got := caps.Decoder("h264", "yuv420p", 1920, 1920); got != "" {
+		t.Fatalf("combined unsupported geometry: %s", got)
+	}
+	if got := caps.Decoder("h264", "yuv420p", 0, 1080); got != "" {
+		t.Fatalf("unknown width should use software: %s", got)
 	}
 }

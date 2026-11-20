@@ -157,6 +157,9 @@ func postJSON(path string, body any, out any, bearer string) error {
 
 func main() {
 	flag.Parse()
+	if strings.EqualFold(*hwaccel, "v4l2m2m") {
+		*capacity = workerCapacity(*hwaccel, *capacity)
+	}
 	if *secret == "" {
 		fmt.Fprintln(os.Stderr, "missing -secret")
 		os.Exit(1)
@@ -516,7 +519,7 @@ func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []st
 	}
 	args = append(args, "-i", job.SourceURL)
 	vcodec := pickEncoder(profile.VideoCodec, hw)
-	if enc := v4l2.Encoder(profile.VideoCodec); enc != "" {
+	if enc := v4l2.Encoder(profile.VideoCodec, job.Probe.Width, job.Probe.Height, profile.Scale); enc != "" {
 		vcodec = enc
 	}
 	args = append(args, "-c:v", vcodec)
@@ -615,4 +618,11 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+func workerCapacity(hw string, requested int) int {
+	if strings.EqualFold(hw, "v4l2m2m") {
+		return 1
+	}
+	return requested
 }

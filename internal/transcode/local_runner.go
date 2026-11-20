@@ -23,16 +23,10 @@ import (
 // detectV4L2M2M 可在测试中替换，避免依赖本机设备
 var detectV4L2M2M = v4l2m2m.Detect
 
-// hardwareSession 报告该 job 的 ffmpeg 是否会打开 V4L2 M2M 设备。
-// 与 buildFFmpegArgsCommon 的选择逻辑保持一致：只有解码器和编码器都
-// 回退到软件时才算纯 CPU 任务。设备探测结果有缓存，不会重复打开设备。
-func hardwareSession(job *Job, profile Profile) bool {
-	if !strings.EqualFold(profile.HWAccel, string(HWV4L2M2M)) {
-		return false
-	}
-	caps := detectV4L2M2M()
-	return caps.Decoder(job.Probe.VideoCodec, job.Probe.PixFmt, job.Probe.Width, job.Probe.Height) != "" ||
-		caps.Encoder(profile.VideoCodec) != ""
+// hardwareSession reserves the single-device scheduler for every opted-in
+// session, including one started before a device becomes available.
+func hardwareSession(_ *Job, profile Profile) bool {
+	return strings.EqualFold(profile.HWAccel, string(HWV4L2M2M))
 }
 
 // limitedBuffer 是一个有容量上限的 io.Writer，超出 maxSize 后静默丢弃。
@@ -616,7 +610,7 @@ func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, dur
 	// 视频编码器
 	vcodec := pickEncoder(profile.VideoCodec, hw)
 	// V4L2 M2M 编码器同样按设备声明来选，设备编不了该格式时回退软件编码
-	if enc := v4l2.Encoder(profile.VideoCodec); enc != "" {
+	if enc := v4l2.Encoder(profile.VideoCodec, job.Probe.Width, job.Probe.Height, profile.Scale); enc != "" {
 		vcodec = enc
 	}
 	args = append(args, "-c:v", vcodec)
