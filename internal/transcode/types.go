@@ -8,17 +8,19 @@ package transcode
 import (
 	"sync"
 	"time"
+
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegargs"
 )
 
 // JobStatus 转码任务状态
 type JobStatus string
 
 const (
-	JobPending  JobStatus = "pending"  // 等待 Worker 领取
-	JobRunning  JobStatus = "running"  // Worker 已领取并在转码
-	JobReady    JobStatus = "ready"    // 至少首切片可用
-	JobFinished JobStatus = "finished" // 全部切片完成
-	JobFailed   JobStatus = "failed"
+	JobPending   JobStatus = "pending"  // 等待 Worker 领取
+	JobRunning   JobStatus = "running"  // Worker 已领取并在转码
+	JobReady     JobStatus = "ready"    // 至少首切片可用
+	JobFinished  JobStatus = "finished" // 全部切片完成
+	JobFailed    JobStatus = "failed"
 	JobCancelled JobStatus = "cancelled"
 )
 
@@ -45,29 +47,9 @@ const (
 	HWV4L2M2M      HWAccel = "v4l2m2m"      // Linux V4L2 M2M（树莓派、Amlogic、高通等 ARM SoC）
 )
 
-// SourceProbe 源文件探测信息（由 ffprobe 得出）
-type SourceProbe struct {
-	Duration     float64 `json:"duration"`      // 秒
-	Size         int64   `json:"size"`          // 字节
-	VideoCodec   string  `json:"video_codec"`   // h264 / hevc / av1 / vp9 ...
-	VideoBitrate int64   `json:"video_bitrate"` // bps
-	Width        int     `json:"width"`
-	Height       int     `json:"height"`
-	PixFmt       string  `json:"pix_fmt"` // yuv420p / yuv420p10le ...
-	AudioCodec   string  `json:"audio_codec"`
-	AudioBitrate int64   `json:"audio_bitrate"`
-}
-
-// Profile 输出转码档位
-type Profile struct {
-	Name         string `json:"name"`           // 例如 1080p
-	VideoCodec   string `json:"video_codec"`    // h264 / hevc / av1
-	VideoBitrate string `json:"video_bitrate"`  // 例如 4000k
-	Scale        string `json:"scale"`          // 例如 1920:-2
-	AudioCodec   string `json:"audio_codec"`    // aac / mp3 / opus / copy
-	AudioBitrate string `json:"audio_bitrate"`  // 例如 160k
-	HWAccel      string `json:"hwaccel"`        // worker 端如何选择硬件加速
-}
+// SourceProbe and Profile are shared with the standalone FFmpeg worker.
+type SourceProbe = ffmpegargs.SourceProbe
+type Profile = ffmpegargs.Profile
 
 // OutputSpec 输出参数
 type OutputSpec struct {
@@ -77,13 +59,13 @@ type OutputSpec struct {
 
 // Job 一次转码任务
 type Job struct {
-	ID            string       `json:"id"`
-	Path          string       `json:"path"`           // OpenList 文件路径
-	SourceURL     string       `json:"source_url"`     // 提供给 Worker 的签名 URL
-	Probe         SourceProbe  `json:"probe"`
-	Profiles      []Profile    `json:"profiles"`
-	Output        OutputSpec   `json:"output"`
-	CallbackToken string       `json:"callback_token"` // Worker 回吐切片用（同时具备写权限，绝不外泄给播放端）
+	ID            string      `json:"id"`
+	Path          string      `json:"path"`       // OpenList 文件路径
+	SourceURL     string      `json:"source_url"` // 提供给 Worker 的签名 URL
+	Probe         SourceProbe `json:"probe"`
+	Profiles      []Profile   `json:"profiles"`
+	Output        OutputSpec  `json:"output"`
+	CallbackToken string      `json:"callback_token"` // Worker 回吐切片用（同时具备写权限，绝不外泄给播放端）
 	// PlayToken 播放凭据：只用于 master/variant playlist 与切片下发，
 	// 与 Worker 回写凭据（CallbackToken）分离，避免播放器拿到可写权限。
 	// json:"-" 保证下发给 Worker 的任务描述里不会包含它。
@@ -159,22 +141,22 @@ func (j *Job) WaitReady() <-chan struct{} { return j.readyCh }
 
 // Worker 节点信息
 type Worker struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Version       string    `json:"version"`
-	Capacity      int       `json:"capacity"`        // 最大并发任务数
-	HWAccel       []string  `json:"hwaccel"`         // 支持的硬件加速
-	CodecsDecode  []string  `json:"codecs_decode"`   // 可解码
-	CodecsEncode  []string  `json:"codecs_encode"`   // 可编码
-	MaxResolution string    `json:"max_resolution"`  // 最大分辨率
-	Tags          []string  `json:"tags"`
-	Endpoint      string    `json:"endpoint,omitempty"` // 反向连接地址（可选）
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	Capacity      int      `json:"capacity"`       // 最大并发任务数
+	HWAccel       []string `json:"hwaccel"`        // 支持的硬件加速
+	CodecsDecode  []string `json:"codecs_decode"`  // 可解码
+	CodecsEncode  []string `json:"codecs_encode"`  // 可编码
+	MaxResolution string   `json:"max_resolution"` // 最大分辨率
+	Tags          []string `json:"tags"`
+	Endpoint      string   `json:"endpoint,omitempty"` // 反向连接地址（可选）
 
 	// 运行时
-	Load        float64   `json:"load"`         // 0~1
-	Running     []string  `json:"running"`      // 当前 job_ids
-	FreeSlots   int       `json:"free_slots"`
-	LastSeen    time.Time `json:"last_seen"`
+	Load         float64   `json:"load"`    // 0~1
+	Running      []string  `json:"running"` // 当前 job_ids
+	FreeSlots    int       `json:"free_slots"`
+	LastSeen     time.Time `json:"last_seen"`
 	RegisteredAt time.Time `json:"registered_at"`
-	Local       bool      `json:"local"` // 是否本地内置 Worker
+	Local        bool      `json:"local"` // 是否本地内置 Worker
 }

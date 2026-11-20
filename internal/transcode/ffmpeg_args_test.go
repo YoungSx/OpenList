@@ -17,7 +17,7 @@ var s805 = v4l2m2m.Caps{
 func withV4L2M2M(t *testing.T, caps v4l2m2m.Caps) {
 	t.Helper()
 	prev := detectV4L2M2M
-	detectV4L2M2M = func() v4l2m2m.Caps { return caps }
+	detectV4L2M2M = func(string) v4l2m2m.Caps { return caps }
 	t.Cleanup(func() { detectV4L2M2M = prev })
 }
 
@@ -28,7 +28,7 @@ func chunkArgs(hw, codec, pixFmt string, height int, startTime float64) []string
 	}
 	profile := Profile{Name: "1080p", VideoCodec: "h264", VideoBitrate: "4000k", Scale: "1920:-2",
 		AudioCodec: "aac", AudioBitrate: "160k", HWAccel: hw}
-	return buildFFmpegChunkArgs(job, profile, 6, startTime, 60, int(startTime)/6, "/tmp/seg-%d.ts", "/tmp/chunk.m3u8")
+	return buildFFmpegChunkArgs(job, profile, 6, startTime, 60, int(startTime)/6, "/tmp/seg-%d.ts", "/tmp/chunk.m3u8", "ffmpeg")
 }
 
 // option 返回 name 后面的值，没有该选项时返回空串
@@ -128,7 +128,7 @@ func TestV4L2M2MWithoutDeviceMatchesCPU(t *testing.T) {
 func TestOtherHWAccelSkipsV4L2Detection(t *testing.T) {
 	detected := false
 	prev := detectV4L2M2M
-	detectV4L2M2M = func() v4l2m2m.Caps { detected = true; return s805 }
+	detectV4L2M2M = func(string) v4l2m2m.Caps { detected = true; return s805 }
 	t.Cleanup(func() { detectV4L2M2M = prev })
 
 	args := chunkArgs("none", "h264", "yuv420p", 1080, 120)

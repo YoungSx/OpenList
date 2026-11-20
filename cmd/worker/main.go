@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegargs"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/v4l2m2m"
 )
 
@@ -82,25 +83,12 @@ type ClaimReq struct {
 	Wait     int    `json:"wait"`
 }
 
-type Profile struct {
-	Name         string `json:"name"`
-	VideoCodec   string `json:"video_codec"`
-	VideoBitrate string `json:"video_bitrate"`
-	Scale        string `json:"scale"`
-	AudioCodec   string `json:"audio_codec"`
-	AudioBitrate string `json:"audio_bitrate"`
-	HWAccel      string `json:"hwaccel"`
-}
+type Profile = ffmpegargs.Profile
 type OutputSpec struct {
 	Format          string `json:"format"`
 	SegmentDuration int    `json:"segment_duration"`
 }
-type Probe struct {
-	VideoCodec string `json:"video_codec"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	PixFmt     string `json:"pix_fmt"`
-}
+type Probe = ffmpegargs.SourceProbe
 type Job struct {
 	ID            string     `json:"id"`
 	Path          string     `json:"path"`
@@ -176,8 +164,8 @@ func main() {
 	}
 	fmt.Printf("[worker] registered: id=%s heartbeat=%ds\n", workerID, hbInterval)
 	if strings.EqualFold(*hwaccel, "v4l2m2m") {
-		if caps := v4l2m2m.Detect(); caps.Empty() {
-			fmt.Println("[worker] v4l2m2m: no V4L2 M2M codec device found, using CPU codecs (in Docker, pass the /dev/video* devices to the container)")
+		if caps := v4l2m2m.DetectForFFmpeg(*ffmpeg); caps.Empty() {
+			fmt.Println("[worker] v4l2m2m: no compatible device and FFmpeg codec pair found, using CPU codecs (check FFmpeg wrappers and container device access)")
 		} else {
 			fmt.Printf("[worker] v4l2m2m: %s\n", caps)
 		}
@@ -475,142 +463,14 @@ func (s *workerState) uploadSegment(job Job, profile string, seq int, dur float6
 // ---- ffmpeg args（与 master 端 local_runner 保持一致）----
 
 // detectV4L2M2M 可在测试中替换，避免依赖本机设备
-var detectV4L2M2M = v4l2m2m.Detect
-
-// protocolWhitelistFor 与 internal/transcode.ProtocolWhitelistFor 保持一致：
-// 远程输入只放行 HTTP(S) 及其传输层，本地路径只放行 file。
-func protocolWhitelistFor(source string) string {
-	s := strings.ToLower(strings.TrimSpace(source))
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		// 与 master 的 protocolWhitelistRemote 保持一致：HTTP 源用不到 file/crypto，
-		// 留着等于给被构造过的播放列表留一条读本地文件的通道。
-		return "http,https,tcp,tls"
-	}
-	return "file"
-}
+var detectV4L2M2M = func() v4l2m2m.Caps { return v4l2m2m.DetectForFFmpeg(*ffmpeg) }
 
 func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []string {
-	hw := strings.ToLower(profile.HWAccel)
-	args := []string{"-y", "-loglevel", "warning"}
-	var v4l2 v4l2m2m.Caps
-	if hw == "v4l2m2m" {
-		v4l2 = detectV4L2M2M()
+	var caps v4l2m2m.Caps
+	if strings.EqualFold(profile.HWAccel, "v4l2m2m") {
+		caps = detectV4L2M2M()
 	}
-	switch hw {
-	case "nvenc":
-		args = append(args, "-hwaccel", "cuda")
-	case "qsv":
-		args = append(args, "-hwaccel", "qsv")
-	case "vaapi":
-		args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-vaapi_device", "/dev/dri/renderD128")
-	case "amf":
-		args = append(args, "-hwaccel", "d3d11va")
-	case "videotoolbox":
-		args = append(args, "-hwaccel", "videotoolbox")
-	case "auto":
-		args = append(args, "-hwaccel", "auto")
-	}
-	// 限制 ffmpeg 可用协议：Master 下发的 source_url 不应被解释成 concat:/subfile: 等特殊协议。
-	// -protocol_whitelist 是输入选项，必须位于 -i 之前。
-	args = append(args, "-protocol_whitelist", protocolWhitelistFor(job.SourceURL))
-	// V4L2 M2M 编解码器不属于 -hwaccel，按设备声明点名；设备不支持时用软件编解码
-	if dec := v4l2.Decoder(job.Probe.VideoCodec, job.Probe.PixFmt, job.Probe.Width, job.Probe.Height); dec != "" {
-		args = append(args, "-c:v", dec)
-	}
-	args = append(args, "-i", job.SourceURL)
-	vcodec := pickEncoder(profile.VideoCodec, hw)
-	if enc := v4l2.Encoder(profile.VideoCodec, job.Probe.Width, job.Probe.Height, profile.Scale); enc != "" {
-		vcodec = enc
-	}
-	args = append(args, "-c:v", vcodec)
-	if strings.HasSuffix(vcodec, "_v4l2m2m") {
-		// 设备只收它支持的原始格式，NV12 最通用，也正是硬解输出的格式
-		args = append(args, "-pix_fmt", "nv12")
-	}
-	if profile.VideoBitrate != "" {
-		args = append(args, "-b:v", profile.VideoBitrate, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
-	}
-	if profile.Scale != "" {
-		switch hw {
-		case "vaapi":
-			args = append(args, "-vf", "scale_vaapi="+profile.Scale)
-		case "qsv":
-			args = append(args, "-vf", "scale_qsv="+profile.Scale)
-		default:
-			args = append(args, "-vf", "scale="+profile.Scale)
-		}
-	}
-	if profile.AudioCodec == "copy" {
-		args = append(args, "-c:a", "copy")
-	} else {
-		ac := profile.AudioCodec
-		if ac == "" {
-			ac = "aac"
-		}
-		args = append(args, "-c:a", ac)
-		if profile.AudioBitrate != "" {
-			args = append(args, "-b:a", profile.AudioBitrate)
-		}
-	}
-	// 只输出音视频：字幕流播放端用不到，还会让 muxer 为交错攒包等字幕，
-	// V4L2 M2M 编码器的输出包被攒住时转码会卡死
-	args = append(args, "-sn", "-dn")
-	segDur := job.Output.SegmentDuration
-	if segDur == 0 {
-		segDur = 6
-	}
-	args = append(args,
-		"-f", "hls",
-		"-hls_time", strconv.Itoa(segDur),
-		"-hls_playlist_type", "vod",
-		"-hls_segment_filename", segPattern,
-		"-hls_flags", "independent_segments",
-		playlist,
-	)
-	return args
-}
-
-func pickEncoder(codec, hw string) string {
-	codec = strings.ToLower(codec)
-	switch codec {
-	case "h264", "":
-		switch hw {
-		case "nvenc":
-			return "h264_nvenc"
-		case "qsv":
-			return "h264_qsv"
-		case "vaapi":
-			return "h264_vaapi"
-		case "amf":
-			return "h264_amf"
-		case "videotoolbox":
-			return "h264_videotoolbox"
-		}
-		return "libx264"
-	case "hevc", "h265":
-		switch hw {
-		case "nvenc":
-			return "hevc_nvenc"
-		case "qsv":
-			return "hevc_qsv"
-		case "vaapi":
-			return "hevc_vaapi"
-		case "amf":
-			return "hevc_amf"
-		case "videotoolbox":
-			return "hevc_videotoolbox"
-		}
-		return "libx265"
-	case "av1":
-		switch hw {
-		case "nvenc":
-			return "av1_nvenc"
-		case "qsv":
-			return "av1_qsv"
-		}
-		return "libsvtav1"
-	}
-	return "libx264"
+	return ffmpegargs.Build(job.SourceURL, job.Probe, profile, job.Output.SegmentDuration, 0, 0, 0, segPattern, playlist, caps)
 }
 
 func truncate(s string, n int) string {
