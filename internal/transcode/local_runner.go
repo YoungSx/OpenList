@@ -390,19 +390,7 @@ func (r *LocalRunner) scanAndPublish(job *Job, profile Profile, dir string, fina
 			dur = d
 		}
 		// 直接登记，不复制（已经在 cache 目录里了）
-		jc.mu.Lock()
-		jc.segments[s.seq] = &SegmentInfo{Seq: s.seq, Duration: dur, Size: s.size, Path: s.path}
-		var toClose []chan struct{}
-		for sk, chs := range jc.waiters {
-			if sk <= s.seq {
-				toClose = append(toClose, chs...)
-				delete(jc.waiters, sk)
-			}
-		}
-		jc.mu.Unlock()
-		for _, ch := range toClose {
-			close(ch)
-		}
+		jc.publishSegment(&SegmentInfo{Seq: s.seq, Duration: dur, Size: s.size, Path: s.path}, false)
 		// 第一片就绪 → 通知 job ready
 		if s.seq == 0 {
 			job.MarkReady()
@@ -437,19 +425,7 @@ func (r *LocalRunner) publishChunkSegments(job *Job, profile Profile, dir string
 		if err != nil || fi.IsDir() || fi.Size() == 0 {
 			continue
 		}
-		jc.mu.Lock()
-		jc.segments[seq] = &SegmentInfo{Seq: seq, Duration: defaultDur, Size: fi.Size(), Path: fpath}
-		var toClose []chan struct{}
-		for sk, chs := range jc.waiters {
-			if sk <= seq {
-				toClose = append(toClose, chs...)
-				delete(jc.waiters, sk)
-			}
-		}
-		jc.mu.Unlock()
-		for _, ch := range toClose {
-			close(ch)
-		}
+		jc.publishSegment(&SegmentInfo{Seq: seq, Duration: defaultDur, Size: fi.Size(), Path: fpath}, false)
 		if seq == 0 {
 			job.MarkReady()
 		}

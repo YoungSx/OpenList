@@ -36,10 +36,10 @@ type JobCache struct {
 
 // Cache 全局切片缓存
 type Cache struct {
-	rootDir   string
-	maxBytes  int64
-	mu        sync.RWMutex
-	jobs      map[string]map[string]*JobCache // jobID -> profile -> cache
+	rootDir  string
+	maxBytes int64
+	mu       sync.RWMutex
+	jobs     map[string]map[string]*JobCache // jobID -> profile -> cache
 }
 
 func NewCache(rootDir string, maxGB int64) *Cache {
@@ -166,24 +166,26 @@ func (c *Cache) PutSegment(jobID, profile string, seq int, duration float64, bod
 	}
 	info := &SegmentInfo{Seq: seq, Duration: duration, Size: n, Path: fpath}
 
+	jc.publishSegment(info, isFinal)
+	return info, nil
+}
+
+// Chunks finish out of order after seeking; only this segment is ready.
+func (jc *JobCache) publishSegment(info *SegmentInfo, final bool) {
 	jc.mu.Lock()
-	jc.segments[seq] = info
-	if isFinal {
-		jc.final = true
-	}
-	// 通知所有等待 <= seq 的 waiter
-	var toClose []chan struct{}
-	for s, chs := range jc.waiters {
-		if s <= seq {
-			toClose = append(toClose, chs...)
-			delete(jc.waiters, s)
+	jc.segments[info.Seq] = info
+	jc.final = jc.final || final
+	var notify []chan struct{}
+	for seq, waiters := range jc.waiters {
+		if seq == info.Seq || final {
+			notify = append(notify, waiters...)
+			delete(jc.waiters, seq)
 		}
 	}
 	jc.mu.Unlock()
-	for _, ch := range toClose {
-		close(ch)
+	for _, waiter := range notify {
+		close(waiter)
 	}
-	return info, nil
 }
 
 // GetSegment 读取一个切片（不等待）
