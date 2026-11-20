@@ -203,6 +203,12 @@ func TranscodePlay(c *gin.Context) {
 		probe.Size = obj.GetSize()
 	}
 	job.Probe = probe
+	if dec := transcode.Decide(transcode.DecideRequest{
+		FileName: obj.GetName(), FileSize: obj.GetSize(), Probe: probe,
+	}); !dec.NeedTranscode {
+		common.SuccessResp(c, gin.H{"transcode": false, "reason": dec.Reason})
+		return
+	}
 	profile := transcode.BuildProfile()
 	job.Profiles = []transcode.Profile{profile}
 	job.Output = transcode.BuildOutputSpec()
