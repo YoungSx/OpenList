@@ -11,6 +11,8 @@ The local and standalone workers now share a pure HLS builder and source/profile
 types. AAC conversion for the `copy` setting, keyframe alignment, input protocol
 limits and temporary-file publication follow the same policy. This does not add
 a board-specific application branch or a new backend framework.
+Segment publication also wakes only the waiter for the produced sequence.
+After seeking, completing a later chunk cannot fail an earlier request.
 
 Validation performed before the candidate image was built:
 
@@ -37,6 +39,22 @@ and without a single-thread limit, plus six pairs of concurrent probe/decode
 calls in temporary containers without codec devices. All completed, with no
 new production restart and no fatal signal in the bounded trace. Failure to
 reproduce does not establish a fix or a root cause.
+
+The final candidate `d1c514c` passed OneCloud checks with the installed v0.4
+driver on 2026-11-20: eight 1080p H.264/AAC segments at sequences
+0/1/2/18/19/6/7/8, independent software decoding, position timestamps,
+and hardware decode/encode process observation. Its master playlist has no
+false fixed profile. Codec and bitrate filters reject before submission;
+an executable without V4L2 wrappers selects software, and the audio `copy`
+setting yields AAC. The image remains a candidate; production was not updated.
+
+Three additional hardware-HLS seeks, each concurrent with Docker exec
+ffprobe and software decoding, completed without container exit or a new
+production restart. The intermediate build exposed an unrelated waiter bug:
+finishing segment 18 woke the request for 6 and returned 404. The final build
+passed that same case after shared publication was corrected. Exit 137 did
+not recur; its original source remains unknown. No kernel errors appeared,
+and the decoder pool returned to zero slots and bytes after the tests.
 
 Candidate hardware results and image/source hashes are delivered alongside the
 candidate archive. Production deployment requires its own acceptance; HTTP
