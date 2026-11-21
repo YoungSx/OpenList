@@ -1,5 +1,10 @@
 # Compatibility changes and hardware evidence
 
+The [2026-11-21 rate-control acceptance](RATE-CONTROL-2026-11-21.md) covers
+the final `7da9ab4` image, measured bandwidth, CFR/fractional timing, short tails,
+cached reads and sought hardware timestamps. The results below are earlier
+candidate checks at their recorded versions.
+
 The follow-up to `c52a889` fixes three behavior problems and removes duplicated
 FFmpeg argument construction. Source codec and bitrate filters run again after
 ffprobe, whole-file and chunked V4L2 jobs share a cancellable device slot, and

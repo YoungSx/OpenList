@@ -1,0 +1,414 @@
+{
+  "status": "pass",
+  "image": "youngsx/openlist-onecloud:v4.2.10-v4l2m2m-7da9ab4",
+  "backend_commit": "7da9ab4e8d7089285467cae4a3442178b92256fd",
+  "encoder_sha256": "366d0653cb3f34a4d7f3c5d876463a28fab857e012ba9e8a991e5ac96bd916fe",
+  "cases": [
+    {
+      "label": "short-30fps",
+      "status": "pass",
+      "segments": [
+        {
+          "seq": 0,
+          "bytes": 434280,
+          "wait_seconds": 3.455,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "1.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1737120
+        },
+        {
+          "seq": 1,
+          "bytes": 442740,
+          "wait_seconds": 1.909,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "3.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1770960
+        },
+        {
+          "seq": 2,
+          "bytes": 442176,
+          "wait_seconds": 2.093,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "5.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1768704
+        },
+        {
+          "seq": 3,
+          "bytes": 115432,
+          "wait_seconds": 1.891,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "7.421333",
+            "nb_read_frames": "15"
+          },
+          "software_decode": true,
+          "duration": 0.5,
+          "segment_bps": 1846912
+        }
+      ],
+      "initial_bandwidth": {
+        "BANDWIDTH": 1770960,
+        "AVERAGE-BANDWIDTH": 1754040
+      },
+      "final_bandwidth": {
+        "BANDWIDTH": 1846912,
+        "AVERAGE-BANDWIDTH": 1765696
+      },
+      "observed": [
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false
+        }
+      ],
+      "warning": ""
+    },
+    {
+      "label": "short-fractional",
+      "status": "pass",
+      "segments": [
+        {
+          "seq": 0,
+          "bytes": 437664,
+          "wait_seconds": 2.933,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "1.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.002,
+          "segment_bps": 1748908
+        },
+        {
+          "seq": 1,
+          "bytes": 441800,
+          "wait_seconds": 2.111,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "3.423333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.002,
+          "segment_bps": 1765435
+        },
+        {
+          "seq": 2,
+          "bytes": 439544,
+          "wait_seconds": 2.017,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "5.425333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.002,
+          "segment_bps": 1756420
+        },
+        {
+          "seq": 3,
+          "bytes": 115808,
+          "wait_seconds": 1.739,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "7.427333",
+            "nb_read_frames": "15"
+          },
+          "software_decode": true,
+          "duration": 0.5,
+          "segment_bps": 1852928
+        }
+      ],
+      "initial_bandwidth": {
+        "BANDWIDTH": 1750656,
+        "AVERAGE-BANDWIDTH": 1750656
+      },
+      "final_bandwidth": {
+        "BANDWIDTH": 1851077,
+        "AVERAGE-BANDWIDTH": 1764164
+      },
+      "observed": [
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30000/1001",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false
+        }
+      ],
+      "warning": ""
+    },
+    {
+      "label": "1080p-seek-low-target",
+      "status": "pass",
+      "segments": [
+        {
+          "seq": 0,
+          "bytes": 1710800,
+          "wait_seconds": 13.374,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "1.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 6843200
+        },
+        {
+          "seq": 1,
+          "bytes": 1780548,
+          "wait_seconds": 9.303,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "3.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7122192
+        },
+        {
+          "seq": 2,
+          "bytes": 1757048,
+          "wait_seconds": 8.392,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "5.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7028192
+        },
+        {
+          "seq": 18,
+          "bytes": 1862516,
+          "wait_seconds": 30.888,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "37.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7450064
+        },
+        {
+          "seq": 19,
+          "bytes": 1742196,
+          "wait_seconds": 9.286,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "39.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 6968784
+        },
+        {
+          "seq": 6,
+          "bytes": 1857064,
+          "wait_seconds": 18.875,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "13.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7428256
+        },
+        {
+          "seq": 7,
+          "bytes": 1789572,
+          "wait_seconds": 10.01,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "15.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7158288
+        },
+        {
+          "seq": 8,
+          "bytes": 1768516,
+          "wait_seconds": 9.947,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "17.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7074064
+        }
+      ],
+      "initial_bandwidth": {
+        "BANDWIDTH": 6843200,
+        "AVERAGE-BANDWIDTH": 6843200
+      },
+      "final_bandwidth": {
+        "BANDWIDTH": 7450064,
+        "AVERAGE-BANDWIDTH": 6982488
+      },
+      "observed": [
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false
+        }
+      ],
+      "warning": "requested video bitrate 1000000 bps; measured HLS bandwidth 6982488 bps, reduce output size/frame rate or use software encoding if bandwidth is limited"
+    }
+  ],
+  "production_settings_changed": false,
+  "browser_tested": false,
+  "standalone_worker_hardware_tested": false,
+  "original_encoder_restored": true,
+  "production_started_at_unchanged": true,
+  "production_restart_count": 0,
+  "production_image": "youngsx/openlist-onecloud:v4.2.10-v4l2m2m-d1c514c",
+  "final_services": {
+    "openlist": 200,
+    "sublink": 200,
+    "vocat": 200,
+    "homeassistant": 200,
+    "arcane_running": true
+  },
+  "decoder_pool_slots": 0,
+  "decoder_pool_bytes": 0,
+  "seconds": 179.691,
+  "kernel_messages": [
+    "[135628.057980] meson-vdec d0050000.video-decoder: loaded firmware meson/vdec/meson8b_h264.bin (36864 bytes)",
+    "[135631.688143] meson-venc d0050000.video-encoder: loaded firmware meson/venc/meson8b_avc_enc.bin (16384 bytes)",
+    "[135647.487194] meson-vdec d0050000.video-decoder: loaded firmware meson/vdec/meson8b_h264.bin (36864 bytes)",
+    "[135647.678043] meson-venc d0050000.video-encoder: loaded firmware meson/venc/meson8b_avc_enc.bin (16384 bytes)",
+    "[135663.435421] meson-vdec d0050000.video-decoder: loaded firmware meson/vdec/meson8b_h264.bin (36864 bytes)",
+    "[135664.015116] meson-venc d0050000.video-encoder: loaded firmware meson/venc/meson8b_avc_enc.bin (16384 bytes)",
+    "[135665.212396] meson-venc d0050000.video-encoder: rate target 1000000 bps saturated at QP 32; measured 6199107 bps, reduce size/fps or use software encoding",
+    "[135703.576216] meson-vdec d0050000.video-decoder: loaded firmware meson/vdec/meson8b_h264.bin (36864 bytes)",
+    "[135708.846089] meson-venc d0050000.video-encoder: loaded firmware meson/venc/meson8b_avc_enc.bin (16384 bytes)",
+    "[135712.494819] meson-venc d0050000.video-encoder: rate target 1000000 bps saturated at QP 32; measured 6569256 bps, reduce size/fps or use software encoding",
+    "[135745.382717] meson-vdec d0050000.video-decoder: loaded firmware meson/vdec/meson8b_h264.bin (36864 bytes)",
+    "[135745.778619] meson-venc d0050000.video-encoder: loaded firmware meson/venc/meson8b_avc_enc.bin (16384 bytes)",
+    "[135747.150114] meson-venc d0050000.video-encoder: rate target 1000000 bps saturated at QP 32; measured 6545256 bps, reduce size/fps or use software encoding",
+    "[135791.968019] meson-venc d0050000.video-encoder: registered meson-video-encoder as /dev/video1"
+  ],
+  "kernel_fatal_messages": []
+}
