@@ -1,0 +1,43 @@
+name: V4L2 M2M regression
+
+on:
+  push:
+    branches: [feat/transcode-v4l2m2m]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v4l2-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests and ARMv7 build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Repository unit-test packages
+        run: go test ./internal/db/... ./internal/transcode/... ./internal/media/... ./internal/fs/... ./server/handles/... ./server/common/... ./pkg/torrent/... ./cmd/worker/...
+      - name: Race checks with image build tags
+        run: go test -tags=jsoniter,netgo,osusergo -race ./internal/transcode/... ./server/handles/... ./cmd/worker/...
+      - name: Vet affected packages
+        run: go vet ./internal/transcode/... ./server/handles/... ./cmd/worker/...
+      - name: Cross-build backend and worker
+        env:
+          GOOS: linux
+          GOARCH: arm
+          GOARM: '7'
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p build/ci
+          go build -trimpath -tags=jsoniter,netgo,osusergo -o build/ci/openlist .
+          go build -trimpath -tags=jsoniter,netgo,osusergo -o build/ci/worker ./cmd/worker
