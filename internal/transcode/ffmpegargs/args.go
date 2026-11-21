@@ -189,9 +189,11 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	args = append(args,
 		"-g", strconv.Itoa(gop),
 		"-keyint_min", strconv.Itoa(gop),
-		"-sc_threshold", "0",
-		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segDur),
 	)
+	if !strings.HasSuffix(vcodec, "_v4l2m2m") {
+		args = append(args, "-sc_threshold", "0")
+	}
+	args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segDur))
 	// 【chunk 模式 - 关键修复】input seek 后 ffmpeg 会把第一帧 PTS 重置为 0，
 	// 这会导致 chunk-30 的切片在播放器看来是 PTS=0~60s（而不是 1800~1860s），
 	// 进而触发 HLS.js bufferAppendError 或时间轴错位。

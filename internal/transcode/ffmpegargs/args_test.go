@@ -41,7 +41,7 @@ func TestHardwareSeekUsesCorrectOutputTimeline(t *testing.T) {
 		slices.Contains(args, "-start_at_zero") || slices.Contains(args, "-to") {
 		t.Fatalf("hardware seek uses incorrect timeline: %v", args)
 	}
-	if value(args, "-start_number") != "18" || slices.Contains(args, "-profile:v") || slices.Contains(args, "-preset") {
+	if value(args, "-start_number") != "18" || slices.Contains(args, "-profile:v") || slices.Contains(args, "-preset") || slices.Contains(args, "-sc_threshold") {
 		t.Fatalf("hardware output received software-only options: %v", args)
 	}
 	if slices.Contains(args, "-maxrate") || slices.Contains(args, "-bufsize") {
@@ -69,7 +69,7 @@ func TestFrameRateAndGOPShareMediaClock(t *testing.T) {
 		if value(args, "-r") != tc.output || value(args, "-fps_mode") != "cfr" || value(args, "-g") != tc.gop {
 			t.Fatalf("rate %s: %v", tc.source, args)
 		}
-		if value(args, "-maxrate") != "4000k" || value(args, "-bufsize") != "4000k" {
+		if value(args, "-maxrate") != "4000k" || value(args, "-bufsize") != "4000k" || value(args, "-sc_threshold") != "0" {
 			t.Fatalf("software bitrate constraints lost: %v", args)
 		}
 	}
