@@ -423,13 +423,21 @@ func (s *workerState) uploadDelta(job Job, profile, dir string, uploaded map[int
 	if segDur == 0 {
 		segDur = 6
 	}
+	durations := map[int]float64{}
+	if data, err := os.ReadFile(filepath.Join(dir, "playlist.m3u8")); err == nil {
+		durations = ffmpegargs.SegmentDurations(string(data))
+	}
 	for i := 0; i < limit; i++ {
 		seg := segs[i]
 		if uploaded[seg.seq] {
 			continue
 		}
 		isLast := final && i == limit-1
-		if err := s.uploadSegment(job, profile, seg.seq, float64(segDur), seg.path, isLast); err != nil {
+		duration := durations[seg.seq]
+		if duration <= 0 {
+			duration = float64(segDur)
+		}
+		if err := s.uploadSegment(job, profile, seg.seq, duration, seg.path, isLast); err != nil {
 			fmt.Printf("[worker] upload seg-%d failed: %v\n", seg.seq, err)
 			return
 		}

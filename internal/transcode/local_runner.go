@@ -368,14 +368,28 @@ func (r *LocalRunner) scanAndPublish(job *Job, profile Profile, dir string, fina
 
 	// 【优化】解析 ffmpeg 写出的 playlist.m3u8 获取每个切片的真实时长
 	// 避免硬编码 segDur 导致 HLS.js 显示总时长不准确
-	realDurations := parseFFmpegPlaylistDurations(filepath.Join(dir, "playlist.m3u8"))
+	realDurations := make(map[int]float64)
+	for seq, duration := range parseFFmpegPlaylistDurations(filepath.Join(dir, "playlist.m3u8")) {
+		realDurations[seq] = duration
+	}
+	// Chunk playlists are atomically written too; preserve their real durations.
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "_chunk_") && strings.HasSuffix(entry.Name(), ".m3u8") {
+			for seq, duration := range parseFFmpegPlaylistDurations(filepath.Join(dir, entry.Name())) {
+				realDurations[seq] = duration
+			}
+		}
+	}
 
 	// ffmpeg 在写入 .ts 时是边写边写,稳妥起见仅登记除最后一片以外的切片(最后一片可能未写完)
 	limit := len(segs)
 	if !finalScan && limit > 0 {
 		limit--
 	}
-	defaultDur := float64(setting.GetInt(conf.TranscodeSegmentDuration, 6))
+	defaultDur := float64(job.Output.SegmentDuration)
+	if defaultDur <= 0 {
+		defaultDur = 6
+	}
 	for i := 0; i < limit; i++ {
 		s := segs[i]
 		jc.mu.RLock()
@@ -391,6 +405,7 @@ func (r *LocalRunner) scanAndPublish(job *Job, profile Profile, dir string, fina
 		}
 		// 直接登记，不复制（已经在 cache 目录里了）
 		jc.publishSegment(&SegmentInfo{Seq: s.seq, Duration: dur, Size: s.size, Path: s.path}, false)
+		r.reportBitrate(job, profile)
 		// 第一片就绪 → 通知 job ready
 		if s.seq == 0 {
 			job.MarkReady()
@@ -406,18 +421,22 @@ func (r *LocalRunner) scanAndPublish(job *Job, profile Profile, dir string, fina
 // publishChunkSegments 把 [startSeq, endSeq) 范围内已经写完的切片登记到 cache。
 // 与 scanAndPublish 不同，这个方法专门用于"某个 chunk 的 ffmpeg 已经退出"的场景，
 // 此时该范围的所有 .ts 文件都是完整的，不能再丢掉最大序号的那片（避免边界切片永远丢失）。
-func (r *LocalRunner) publishChunkSegments(job *Job, profile Profile, dir string, startSeq, endSeq int) {
+func (r *LocalRunner) publishChunkSegments(job *Job, profile Profile, dir string, startSeq, endSeq int, playlistPath string) {
 	jc, err := r.mgr.Cache.getOrCreate(job.ID, profile.Name)
 	if err != nil {
 		return
 	}
-	defaultDur := float64(setting.GetInt(conf.TranscodeSegmentDuration, 6))
+	defaultDur := float64(job.Output.SegmentDuration)
+	if defaultDur <= 0 {
+		defaultDur = 6
+	}
+	durations := parseFFmpegPlaylistDurations(playlistPath)
 	registered := 0
 	for seq := startSeq; seq < endSeq; seq++ {
 		jc.mu.RLock()
 		_, exists := jc.segments[seq]
 		jc.mu.RUnlock()
-		if exists {
+		if exists && durations[seq] == 0 {
 			continue
 		}
 		fpath := filepath.Join(dir, fmt.Sprintf("seg-%d.ts", seq))
@@ -425,7 +444,12 @@ func (r *LocalRunner) publishChunkSegments(job *Job, profile Profile, dir string
 		if err != nil || fi.IsDir() || fi.Size() == 0 {
 			continue
 		}
-		jc.publishSegment(&SegmentInfo{Seq: seq, Duration: defaultDur, Size: fi.Size(), Path: fpath}, false)
+		duration := defaultDur
+		if durations[seq] > 0 {
+			duration = durations[seq]
+		}
+		jc.publishSegment(&SegmentInfo{Seq: seq, Duration: duration, Size: fi.Size(), Path: fpath}, false)
+		r.reportBitrate(job, profile)
 		if seq == 0 {
 			job.MarkReady()
 		}
@@ -434,6 +458,27 @@ func (r *LocalRunner) publishChunkSegments(job *Job, profile Profile, dir string
 	if registered > 0 {
 		utils.Log.Infof("[transcode][chunk] published %d segments [%d, %d) for job=%s",
 			registered, startSeq, endSeq, job.ID)
+	}
+}
+
+func (r *LocalRunner) reportBitrate(job *Job, profile Profile) {
+	target, err := parseBitrate(profile.VideoBitrate)
+	if err != nil || target <= 0 || !strings.EqualFold(profile.HWAccel, string(HWV4L2M2M)) ||
+		r.mgr.Cache.SegmentCount(job.ID, profile.Name) < 3 {
+		return
+	}
+	audio, _ := parseBitrate(profile.AudioBitrate)
+	_, actual := r.mgr.Cache.profileBandwidth(job.ID, profile.Name)
+	// The measurement includes audio and TS overhead; avoid startup-only warnings.
+	if actual > (target+audio)*5/4 {
+		warning := fmt.Sprintf("requested video bitrate %d bps; measured HLS bandwidth %d bps, reduce output size/frame rate or use software encoding if bandwidth is limited", target, actual)
+		job.mu.Lock()
+		first := job.Warning == ""
+		job.Warning = warning
+		job.mu.Unlock()
+		if first {
+			utils.Log.Warnf("[transcode] %s", warning)
+		}
 	}
 }
 
@@ -471,28 +516,7 @@ func parseFFmpegPlaylistDurations(path string) map[int]float64 {
 	if err != nil {
 		return out
 	}
-	lines := strings.Split(string(data), "\n")
-	var pendingDur float64
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#EXTINF:") {
-			// #EXTINF:6.000000,
-			body := strings.TrimPrefix(line, "#EXTINF:")
-			body = strings.TrimSuffix(body, ",")
-			d, err := strconv.ParseFloat(strings.TrimSpace(body), 64)
-			if err == nil {
-				pendingDur = d
-			}
-			continue
-		}
-		if strings.HasSuffix(line, ".ts") && strings.HasPrefix(line, "seg-") {
-			numStr := strings.TrimSuffix(strings.TrimPrefix(line, "seg-"), ".ts")
-			if seq, err := strconv.Atoi(numStr); err == nil && pendingDur > 0 {
-				out[seq] = pendingDur
-			}
-			pendingDur = 0
-		}
-	}
+	out = ffmpegargs.SegmentDurations(string(data))
 	// 写入缓存
 	playlistDurCacheMu.Lock()
 	playlistDurCache[path] = &playlistDurCacheEntry{
@@ -544,7 +568,7 @@ func ProbeSource(url string) (SourceProbe, error) {
 	args := []string{
 		"-v", "error",
 		"-protocol_whitelist", ProtocolWhitelistFor(url),
-		"-show_entries", "format=duration,size,bit_rate:stream=codec_type,codec_name,bit_rate,width,height,pix_fmt",
+		"-show_entries", "format=duration,size,bit_rate:stream=codec_type,codec_name,bit_rate,width,height,pix_fmt,avg_frame_rate,r_frame_rate",
 		"-of", "json",
 		url,
 	}
@@ -565,12 +589,14 @@ func ProbeSource(url string) (SourceProbe, error) {
 			BitRate  string `json:"bit_rate"`
 		} `json:"format"`
 		Streams []struct {
-			CodecType string `json:"codec_type"`
-			CodecName string `json:"codec_name"`
-			BitRate   string `json:"bit_rate"`
-			Width     int    `json:"width"`
-			Height    int    `json:"height"`
-			PixFmt    string `json:"pix_fmt"`
+			CodecType    string `json:"codec_type"`
+			CodecName    string `json:"codec_name"`
+			BitRate      string `json:"bit_rate"`
+			Width        int    `json:"width"`
+			Height       int    `json:"height"`
+			PixFmt       string `json:"pix_fmt"`
+			AvgFrameRate string `json:"avg_frame_rate"`
+			FrameRate    string `json:"r_frame_rate"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
@@ -585,6 +611,10 @@ func ProbeSource(url string) (SourceProbe, error) {
 			p.Width = s.Width
 			p.Height = s.Height
 			p.PixFmt = s.PixFmt
+			p.FrameRate = s.AvgFrameRate
+			if p.FrameRate == "" || p.FrameRate == "0/0" {
+				p.FrameRate = s.FrameRate
+			}
 			p.VideoBitrate, _ = strconv.ParseInt(s.BitRate, 10, 64)
 		}
 		if s.CodecType == "audio" && p.AudioCodec == "" {

@@ -6,6 +6,7 @@
 package transcode
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -85,11 +86,20 @@ type Job struct {
 	FinishedAt   time.Time `json:"finished_at"`
 	LastAccessAt time.Time `json:"last_access_at"` // 播放端最后一次请求 segment/playlist 的时间
 	Error        string    `json:"error,omitempty"`
+	Warning      string    `json:"warning,omitempty"`
 
 	// 内部：用于"边转边播"——首切片就绪后关闭该 channel
 	readyOnce sync.Once
 	readyCh   chan struct{}
 	mu        sync.RWMutex
+}
+
+// MarshalJSON snapshots runtime fields under the same lock as their writers.
+func (j *Job) MarshalJSON() ([]byte, error) {
+	type wireJob Job
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	return json.Marshal((*wireJob)(j))
 }
 
 // NewJob 构造任务（自动初始化内部 channel）

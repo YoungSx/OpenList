@@ -36,4 +36,30 @@ func TestHardwareSeekUsesCorrectOutputTimeline(t *testing.T) {
 	if value(args, "-start_number") != "18" || slices.Contains(args, "-profile:v") || slices.Contains(args, "-preset") {
 		t.Fatalf("hardware output received software-only options: %v", args)
 	}
+	if slices.Contains(args, "-maxrate") || slices.Contains(args, "-bufsize") {
+		t.Fatalf("unsupported V4L2 peak constraints were passed: %v", args)
+	}
+}
+
+func TestFrameRateAndGOPShareMediaClock(t *testing.T) {
+	for _, tc := range []struct {
+		source, output, gop string
+	}{
+		{"30/1", "30/1", "60"},
+		{"30000/1001", "30000/1001", "60"},
+		{"24000/1001", "24000/1001", "48"},
+		{"25/1", "25/1", "50"},
+		{"0/0", "30/1", "60"},
+		{"-30/1", "30/1", "60"},
+	} {
+		args := Build("/media/movie.mp4", SourceProbe{FrameRate: tc.source},
+			Profile{VideoCodec: "h264", VideoBitrate: "4000k"}, 2, 0, 0, 0,
+			"/tmp/seg-%d.ts", "/tmp/list.m3u8", v4l2m2m.Caps{})
+		if value(args, "-r") != tc.output || value(args, "-fps_mode") != "cfr" || value(args, "-g") != tc.gop {
+			t.Fatalf("rate %s: %v", tc.source, args)
+		}
+		if value(args, "-maxrate") != "4000k" || value(args, "-bufsize") != "4000k" {
+			t.Fatalf("software bitrate constraints lost: %v", args)
+		}
+	}
 }

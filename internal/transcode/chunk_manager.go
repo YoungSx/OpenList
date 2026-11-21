@@ -429,14 +429,12 @@ func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc,
 	c.chunkDoneClose()
 	s.mu.Unlock()
 
-	// 删除临时 playlist 文件
-	_ = os.Remove(chunkPlaylist)
-
 	// 【关键修复】chunk 自然完成时，必须用 finalScan-style 扫描，否则边界切片（最大 seq）
 	// 永远不会被登记到 cache，导致下次播放/拖动到该位置时 60 秒超时
 	if cm.mgr != nil && cm.mgr.localRunner != nil {
-		cm.mgr.localRunner.publishChunkSegments(s.Job, s.ProfDef, s.OutDir, c.StartSeq, c.EndSeq)
+		cm.mgr.localRunner.publishChunkSegments(s.Job, s.ProfDef, s.OutDir, c.StartSeq, c.EndSeq, chunkPlaylist)
 	}
+	_ = os.Remove(chunkPlaylist)
 }
 
 // sessionLoop 每个 session 的后台维护：空闲清理 + 全部完成检测 + 预读

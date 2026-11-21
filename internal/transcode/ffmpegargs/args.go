@@ -3,6 +3,7 @@ package ffmpegargs
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,7 @@ type SourceProbe struct {
 	PixFmt       string  `json:"pix_fmt"` // yuv420p / yuv420p10le ...
 	AudioCodec   string  `json:"audio_codec"`
 	AudioBitrate int64   `json:"audio_bitrate"`
+	FrameRate    string  `json:"frame_rate,omitempty"`
 }
 
 // Profile 输出转码档位
@@ -111,7 +113,10 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	}
 	if profile.VideoBitrate != "" {
 		args = append(args, "-b:v", profile.VideoBitrate)
-		args = append(args, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
+		// Upstream V4L2 wrappers do not forward peak/CPB constraints to drivers.
+		if !strings.HasSuffix(vcodec, "_v4l2m2m") {
+			args = append(args, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
+		}
 	}
 	if profile.Scale != "" {
 		// 软件 / 硬件缩放
@@ -153,11 +158,10 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	if segDur <= 0 {
 		segDur = 6
 	}
-	// 【关键】强制关键帧对齐切片边界，确保每个切片以 IDR 帧开始可独立解码。
-	// 没有这些参数时，第一个切片可能不含 IDR 帧，导致 HLS.js bufferAppendError。
-	// fps 假设 25 (帧率未知时的保守值)，gop = segDur * fps；force_key_frames 让
-	// ffmpeg 在每个切片边界强制插入关键帧。
-	gop := segDur * 25
+	// CFR gives the encoder's rate budget and segment GOP the same media clock.
+	fps, rate := outputFrameRate(probe.FrameRate)
+	args = append(args, "-r", rate, "-fps_mode", "cfr")
+	gop := int(math.Ceil(fps * float64(segDur)))
 	args = append(args,
 		"-g", strconv.Itoa(gop),
 		"-keyint_min", strconv.Itoa(gop),
@@ -184,6 +188,21 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	}
 	args = append(args, playlistPath)
 	return args
+}
+
+func outputFrameRate(rate string) (float64, string) {
+	parts := strings.Split(rate, "/")
+	if len(parts) == 2 {
+		numerator, nerr := strconv.ParseUint(parts[0], 10, 32)
+		denominator, derr := strconv.ParseUint(parts[1], 10, 32)
+		if nerr == nil && derr == nil && numerator > 0 && denominator > 0 {
+			fps := float64(numerator) / float64(denominator)
+			if fps >= 1 && fps <= 240 {
+				return fps, rate
+			}
+		}
+	}
+	return 30, "30/1"
 }
 
 // pickEncoder 根据视频编码 + HW 类型选择 ffmpeg 编码器

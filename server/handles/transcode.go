@@ -314,11 +314,25 @@ func TCMaster(c *gin.Context) {
 	}
 	apiURL := common.GetApiUrlFromRequest(c.Request)
 	baseURL := fmt.Sprintf("%s/tc/%s/%s/", apiURL, jobID, token)
-	body := transcode.Default().Cache.MasterPlaylist(job.Profiles, baseURL)
+	if strings.EqualFold(job.Profiles[0].HWAccel, string(transcode.HWV4L2M2M)) {
+		select {
+		case <-job.WaitReady():
+			if job.GetStatus() == transcode.JobFailed {
+				c.String(http.StatusInternalServerError, "transcode failed before bandwidth measurement")
+				return
+			}
+		case <-c.Request.Context().Done():
+			return
+		case <-time.After(30 * time.Second):
+			c.String(http.StatusGatewayTimeout, "timeout waiting first measured segment")
+			return
+		}
+	}
+	body := transcode.Default().Cache.MasterPlaylist(job.ID, job.Profiles, baseURL)
 	job.Touch()
 	c.Header("Content-Type", "application/vnd.apple.mpegurl")
-	// Master playlist 内容在 job 生命周期内不变，设置较长缓存
-	c.Header("Cache-Control", "public, max-age=3600")
+	// Measured bandwidth evolves as chunks are produced.
+	c.Header("Cache-Control", "public, max-age=2")
 	c.String(http.StatusOK, body)
 }
 
@@ -572,7 +586,7 @@ func WorkerSegmentUpload(c *gin.Context) {
 	_, err := transcode.Default().Cache.PutSegment(jobID, profile, seq, dur, c.Request.Body, isFinal)
 	if err != nil {
 		switch err {
-		case transcode.ErrInvalidProfile, transcode.ErrInvalidJobID, transcode.ErrInvalidSegment:
+		case transcode.ErrInvalidProfile, transcode.ErrInvalidJobID, transcode.ErrInvalidSegment, transcode.ErrInvalidSegmentDuration:
 			common.ErrorResp(c, err, 400)
 		case transcode.ErrSegmentTooLarge:
 			common.ErrorResp(c, err, 413)

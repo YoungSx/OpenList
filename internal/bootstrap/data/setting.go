@@ -326,7 +326,7 @@ func InitialSettings() []model.SettingItem {
 		{Key: conf.TranscodeOutputCodec, Value: "h264", Type: conf.TypeSelect, Options: "h264,hevc,av1", Group: model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `重新编码后的视频编码，推荐 h264（最广兼容、互联网分发免授权费）`},
 		{Key: conf.TranscodeOutputBitrate, Value: "4000k", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,
-			Help: `输出视频码率，例如 4000k / 6M。建议 1080p:4000k、720p:2500k`},
+			Help: `输出目标视频码率，例如 4000k / 6M。V4L2 设备可能无法达到该目标；请查看实际切片带宽与任务警告，受限网络应降低分辨率/帧率或改用软件编码`},
 		{Key: conf.TranscodeOutputAudioCodec, Value: "aac", Type: conf.TypeSelect, Options: "aac,mp3,opus,copy", Group: model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `输出音频编码，aac 兼容性最好；copy=直接复制源音频流`},
 		{Key: conf.TranscodeOutputAudioBitrate, Value: "160k", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,

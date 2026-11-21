@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,10 +29,13 @@ type JobCache struct {
 	Profile string
 	BaseDir string
 
-	mu       sync.RWMutex
-	segments map[int]*SegmentInfo
-	final    bool                    // 是否所有切片都到齐
-	waiters  map[int][]chan struct{} // seq -> 等待这一片的 channel 列表
+	mu            sync.RWMutex
+	segments      map[int]*SegmentInfo
+	final         bool // 是否所有切片都到齐
+	peakBandwidth int64
+	totalBytes    int64
+	totalDuration float64
+	waiters       map[int][]chan struct{} // seq -> 等待这一片的 channel 列表
 }
 
 // Cache 全局切片缓存
@@ -76,7 +80,8 @@ var (
 	// ErrInvalidSegment 切片序号越界
 	ErrInvalidSegment = errors.New("invalid segment seq")
 	// ErrSegmentTooLarge 切片超过大小上限
-	ErrSegmentTooLarge = errors.New("segment too large")
+	ErrSegmentTooLarge        = errors.New("segment too large")
+	ErrInvalidSegmentDuration = errors.New("invalid segment duration")
 )
 
 // ValidProfileName 判断 profile 是否为安全的目录名（与 BuildProfile 产出的 source/1080p/720p 对齐）。
@@ -135,6 +140,9 @@ func (c *Cache) PutSegment(jobID, profile string, seq int, duration float64, bod
 	if seq < 0 || seq > maxSegmentSeq {
 		return nil, ErrInvalidSegment
 	}
+	if duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return nil, ErrInvalidSegmentDuration
+	}
 	jc, err := c.getOrCreate(jobID, profile)
 	if err != nil {
 		return nil, err
@@ -173,7 +181,19 @@ func (c *Cache) PutSegment(jobID, profile string, seq int, duration float64, bod
 // Chunks finish out of order after seeking; only this segment is ready.
 func (jc *JobCache) publishSegment(info *SegmentInfo, final bool) {
 	jc.mu.Lock()
+	if previous := jc.segments[info.Seq]; previous != nil {
+		jc.totalBytes -= previous.Size
+		jc.totalDuration -= previous.Duration
+	}
 	jc.segments[info.Seq] = info
+	jc.totalBytes += info.Size
+	jc.totalDuration += info.Duration
+	if info.Duration > 0 && !math.IsNaN(info.Duration) && !math.IsInf(info.Duration, 0) {
+		bandwidth := measuredBitrate(info.Size, info.Duration)
+		if bandwidth > jc.peakBandwidth {
+			jc.peakBandwidth = bandwidth
+		}
+	}
 	jc.final = jc.final || final
 	var notify []chan struct{}
 	for seq, waiters := range jc.waiters {
@@ -352,21 +372,53 @@ func (c *Cache) BuildPlaylist(jobID, profile string, segDur int, completed bool,
 }
 
 // MasterPlaylist 多档位主 m3u8
-func (c *Cache) MasterPlaylist(profiles []Profile, baseURL string) string {
+func (c *Cache) MasterPlaylist(jobID string, profiles []Profile, baseURL string) string {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
 	for _, p := range profiles {
 		bw, _ := parseBitrate(p.VideoBitrate)
 		ab, _ := parseBitrate(p.AudioBitrate)
+		bandwidth, average := c.profileBandwidth(jobID, p.Name)
+		if bandwidth < bw+ab {
+			bandwidth = bw + ab
+		}
+		averageAttribute := ""
+		if average > 0 {
+			averageAttribute = fmt.Sprintf(",AVERAGE-BANDWIDTH=%d", average)
+		}
 		if strings.EqualFold(p.HWAccel, string(HWV4L2M2M)) {
 			// V4L2 controls the actual profile; omit the optional CODECS until known.
-			b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d\n", bw+ab))
+			b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d%s\n", bandwidth, averageAttribute))
 		} else {
-			b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=\"%s\"\n", bw+ab, buildCodecString(p)))
+			b.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d%s,CODECS=\"%s\"\n", bandwidth, averageAttribute, buildCodecString(p)))
 		}
 		b.WriteString(fmt.Sprintf("%s%s/playlist.m3u8\n", baseURL, p.Name))
 	}
 	return b.String()
+}
+
+func (c *Cache) profileBandwidth(jobID, profile string) (int64, int64) {
+	c.mu.RLock()
+	jc := c.jobs[jobID][profile]
+	c.mu.RUnlock()
+	if jc == nil {
+		return 0, 0
+	}
+	jc.mu.RLock()
+	defer jc.mu.RUnlock()
+	average := int64(0)
+	if jc.totalDuration > 0 && !math.IsNaN(jc.totalDuration) && !math.IsInf(jc.totalDuration, 0) {
+		average = measuredBitrate(jc.totalBytes, jc.totalDuration)
+	}
+	return jc.peakBandwidth, average
+}
+
+func measuredBitrate(bytes int64, duration float64) int64 {
+	rate := math.Ceil(float64(bytes) * 8 / duration)
+	if rate >= math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(rate)
 }
 
 // buildCodecString 根据 Profile 生成 HLS CODECS 属性字符串

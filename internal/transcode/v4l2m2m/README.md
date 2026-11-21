@@ -47,6 +47,31 @@ encoders receive NV12 without the software encoder's named High profile/preset
 options. V4L2 master playlists omit the optional `CODECS` attribute because
 the profile cannot be predicted from the requested codec alone.
 
+Source probing reads the average frame rate, falling back to the stream rate.
+Both workers produce CFR at that rational rate (1–240 fps; unknown rates use
+30/1) and set the GOP to `ceil(fps × segment duration)`. Fractional-rate segment
+durations and a short final segment come from FFmpeg's playlist rather than a
+fixed duration. The frame-rate range describes argument validation, not a
+device performance guarantee.
+
+`VideoBitrate` is a target for the device's rate controller. The V4L2 wrapper
+receives `-b:v`; it does not receive `-maxrate`/`-bufsize`, which upstream FFmpeg
+does not map to V4L2 peak/CPB controls. Other encoder backends keep their existing
+arguments. This integration does not provide a strict network bandwidth cap.
+After the first segment is ready, the master playlist advertises the greater
+of the requested video-plus-audio rate and the highest measured segment rate.
+`AVERAGE-BANDWIDTH` uses total segment bytes divided by their total media
+duration, including audio and TS overhead. Measurements update as chunks finish,
+and the master response has a two-second cache lifetime. Past segment rates
+cannot guarantee a future scene's peak rate.
+
+For local V4L2 jobs, an observed average above 125% of the requested
+video-plus-audio rate after at least three segments produces a `warning` in
+`GET /api/admin/transcode/jobs` and one log message. Playback continues. Select
+a smaller output resolution or software encoding when the connection cannot
+carry the measured rate. Automatic downscaling, live rate guarantees and retrying
+a partially encoded chunk with another encoder are not implemented.
+
 The play endpoint first filters size/extension, then checks source codec and
 bitrate again after ffprobe before submitting a job. An unknown probe field
 retains the existing permissive behavior; device selection remains conservative.
