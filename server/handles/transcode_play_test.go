@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	_ "github.com/OpenListTeam/OpenList/v4/drivers/local"
@@ -85,6 +86,10 @@ func TestTranscodePlayAppliesProbedFiltersBeforeSubmitting(t *testing.T) {
 		} else {
 			if !result.Data.Transcode || result.Data.JobID == "" {
 				t.Fatalf("matching source was rejected: %s", response.Body.String())
+			}
+			job, ok := transcode.Default().Scheduler.Get(result.Data.JobID)
+			if !ok || !strings.HasPrefix(job.SourceURL, "http") || strings.Contains(job.SourceURL, root) {
+				t.Fatal("remote worker received a Master-only file path")
 			}
 			transcode.Default().Scheduler.Cancel(result.Data.JobID)
 		}

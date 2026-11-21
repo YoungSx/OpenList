@@ -147,12 +147,13 @@ func TranscodePlay(c *gin.Context) {
 	// 高达 MaxBufferLimit (默认系统内存 5%) 的大缓冲。这是降低 Go 进程内存
 	// 占用最有效的方法。如果不是本地驱动则退回到 HTTP 签名 URL。
 	var sourceURL string
-	if localFile, ok := resolveLocalFilePath(req.Path); ok {
+	localFile, isLocal := resolveLocalFilePath(req.Path)
+	if isLocal && setting.GetStr(conf.TranscodeRunMode, "local") == "local" {
 		// ffmpeg 接受本地路径作为输入，无需 file:// 前缀
 		sourceURL = localFile
 		fmt.Printf("[transcode] using local file path for ffmpeg: %s\n", localFile)
 	} else {
-		// 远程驱动：构造签名 HTTP URL。
+		// 远程 worker 没有 Master 的文件系统，统一使用签名 HTTP URL。
 		// 这个 URL 会被服务端 ffmpeg 直接访问，绝不能使用 Host / X-Forwarded-Host：
 		// 未配置 site_url 时攻击者可借此让服务器去拉取任意地址（SSRF）。
 		base := trustedInternalBaseURL()
@@ -194,6 +195,9 @@ func TranscodePlay(c *gin.Context) {
 	probe, perr := func() (transcode.SourceProbe, error) {
 		// 用 defer 释放：探测内部 panic 时也不能把槽位永久占住
 		defer probeSlots.release(ownerID)
+		if isLocal {
+			return transcode.ProbeSource(localFile)
+		}
 		return transcode.ProbeSource(sourceURL)
 	}()
 	if perr != nil {
