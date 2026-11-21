@@ -64,16 +64,15 @@ func TestV4L2M2MChunkArgs(t *testing.T) {
 			t.Errorf("%s passed to h264_v4l2m2m: %v", name, args)
 		}
 	}
-	// 硬解的 chunk 用源时间戳 seek，输出时间戳本身就从 startTime 开始
-	if !slices.Contains(args, "-copyts") || !slices.Contains(args, "-start_at_zero") {
-		t.Errorf("chunk with hardware decode lacks -copyts -start_at_zero: %v", args)
+	// Keep decoder timestamps nonnegative, rebase CFR, then restore the seek offset.
+	if !slices.Contains(args, "-copyts") || option(args, "-vf") != "scale=1920:-2,setpts=PTS-STARTPTS" {
+		t.Errorf("hardware timestamps were not rebased before CFR: %v", args)
 	}
-	if slices.Contains(args, "-output_ts_offset") {
-		t.Errorf("-output_ts_offset with -copyts shifts the chunk twice: %v", args)
+	if option(args, "-output_ts_offset") != "120.000" {
+		t.Errorf("hardware chunk lost its absolute position: %v", args)
 	}
-	// -copyts 下 -t 按源时间戳截止，chunk 结束位置要用 -to
-	if slices.Contains(args, "-t") || option(args, "-to") != "180.000" {
-		t.Errorf("chunk end not given as -to 180.000: %v", args)
+	if slices.Contains(args, "-to") || option(args, "-t") != "60.000" {
+		t.Errorf("rebased chunk lacks its bounded duration: %v", args)
 	}
 	if !slices.Contains(args, "-sn") || !slices.Contains(args, "-dn") {
 		t.Errorf("subtitle/data streams not dropped: %v", args)

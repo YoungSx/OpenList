@@ -28,9 +28,11 @@ func TestHLSCopyAudioUsesBrowserCompatibleEncoding(t *testing.T) {
 
 func TestHardwareSeekUsesCorrectOutputTimeline(t *testing.T) {
 	caps := v4l2m2m.Caps{Decode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}, Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}}
-	args := Build("/media/movie.mp4", SourceProbe{VideoCodec: "h264", PixFmt: "yuv420p", Width: 1920, Height: 1080},
+	args := Build("/media/movie.mp4", SourceProbe{VideoCodec: "h264", AudioCodec: "aac", PixFmt: "yuv420p", Width: 1920, Height: 1080},
 		Profile{VideoCodec: "h264", HWAccel: "v4l2m2m"}, 2, 36, 12, 18, "/tmp/seg-%d.ts", "/tmp/list.m3u8", caps)
-	if !slices.Contains(args, "-copyts") || value(args, "-to") != "48.000" || slices.Contains(args, "-output_ts_offset") {
+	if !slices.Contains(args, "-copyts") || value(args, "-t") != "12.000" || value(args, "-output_ts_offset") != "36.000" ||
+		value(args, "-vf") != "setpts=PTS-STARTPTS" || value(args, "-af") != "asetpts=PTS-STARTPTS" ||
+		slices.Contains(args, "-start_at_zero") || slices.Contains(args, "-to") {
 		t.Fatalf("hardware seek uses incorrect timeline: %v", args)
 	}
 	if value(args, "-start_number") != "18" || slices.Contains(args, "-profile:v") || slices.Contains(args, "-preset") {

@@ -54,6 +54,11 @@ durations and a short final segment come from FFmpeg's playlist rather than a
 fixed duration. The frame-rate range describes argument validation, not a
 device performance guarantee.
 
+Sought hardware input keeps nonnegative source timestamps into V4L2. Video and
+audio filters then rebase the chunk before CFR encoding, its duration is bounded
+relative to that start, and the muxer restores the seek offset. This keeps later
+chunks on the same playback timeline as the first chunk.
+
 `VideoBitrate` is a target for the device's rate controller. The V4L2 wrapper
 receives `-b:v`; it does not receive `-maxrate`/`-bufsize`, which upstream FFmpeg
 does not map to V4L2 peak/CPB controls. Other encoder backends keep their existing

@@ -58,7 +58,7 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 
 	// V4L2 M2M 解码器不属于 -hwaccel，要在 -i 之前按源编码点名；设备不支持该源时软解
 	decoder := v4l2.Decoder(probe.VideoCodec, probe.PixFmt, probe.Width, probe.Height)
-	// 硬解的 chunk 保留源时间戳，原因见下
+	// Keep nonnegative timestamps into V4L2, then rebase before CFR encoding.
 	copyTS := decoder != "" && startTime > 0.001
 
 	// 【chunk 模式】input seek：放在 -i 之前，速度快，会按关键帧对齐
@@ -71,10 +71,9 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	// 交给 V4L2 时拆出负的微秒，内核按无符号换算成纳秒，这些帧的时间戳因此
 	// 往后错 2^32 纳秒（32 位内核）或 2^32 微秒（64 位内核），trim 丢不掉，
 	// 输出时间戳倒退，muxer 等音频时扣住编码器的全部输出缓冲，转码卡死。
-	// -copyts 让解码器只收到非负的源时间戳；-start_at_zero 像默认路径一样把
-	// 源起点归零，于是输出时间戳直接从 startTime 开始，不再需要 -output_ts_offset。
+	// -copyts 让解码器只收到非负的源时间戳；输出在过滤器中归零，再显式偏移。
 	if copyTS {
-		args = append(args, "-copyts", "-start_at_zero")
+		args = append(args, "-copyts")
 	}
 
 	// 输入：先限定协议白名单（输入选项，必须在 -i 之前），再指定输入
@@ -86,13 +85,7 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 
 	// 【chunk 模式】限定时长（output side 更精确）
 	if duration > 0.001 {
-		if copyTS {
-			// -copyts 下输出端的 -t 也按源时间戳计，会在 duration 处而不是
-			// startTime+duration 处截止；改用 -to 给出结束位置
-			args = append(args, "-to", fmt.Sprintf("%.3f", startTime+duration))
-		} else {
-			args = append(args, "-t", fmt.Sprintf("%.3f", duration))
-		}
+		args = append(args, "-t", fmt.Sprintf("%.3f", duration))
 	}
 
 	// 视频编码器
@@ -118,16 +111,26 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 			args = append(args, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
 		}
 	}
+	videoFilter := ""
 	if profile.Scale != "" {
 		// 软件 / 硬件缩放
 		switch hw {
 		case "vaapi":
-			args = append(args, "-vf", "scale_vaapi="+profile.Scale)
+			videoFilter = "scale_vaapi=" + profile.Scale
 		case "qsv":
-			args = append(args, "-vf", "scale_qsv="+profile.Scale)
+			videoFilter = "scale_qsv=" + profile.Scale
 		default:
-			args = append(args, "-vf", "scale="+profile.Scale)
+			videoFilter = "scale=" + profile.Scale
 		}
+	}
+	if copyTS {
+		if videoFilter != "" {
+			videoFilter += ","
+		}
+		videoFilter += "setpts=PTS-STARTPTS"
+	}
+	if videoFilter != "" {
+		args = append(args, "-vf", videoFilter)
 	}
 	if preset := defaultPresetFor(vcodec); preset != "" {
 		args = append(args, "-preset", preset)
@@ -149,6 +152,9 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	args = append(args, "-b:a", ab)
 	// 强制立体声 + 48kHz，避免 5.1 声道 / 高采样率导致的兼容问题
 	args = append(args, "-ac", "2", "-ar", "48000")
+	if copyTS && probe.AudioCodec != "" {
+		args = append(args, "-af", "asetpts=PTS-STARTPTS")
+	}
 	// 只输出音视频。源里有字幕时默认映射会带上一路字幕：播放端用不到，muxer
 	// 还要为交错攒约 10 秒的包等字幕，首切片明显变慢；V4L2 M2M 编码器的输出包
 	// 引用设备缓冲，被攒住时转码直接卡死。
@@ -172,7 +178,7 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	// 这会导致 chunk-30 的切片在播放器看来是 PTS=0~60s（而不是 1800~1860s），
 	// 进而触发 HLS.js bufferAppendError 或时间轴错位。
 	// 解决方法：用 -output_ts_offset 让生成的切片时间戳偏移到原始位置。
-	if startTime > 0.001 && !copyTS {
+	if startTime > 0.001 {
 		args = append(args, "-output_ts_offset", fmt.Sprintf("%.3f", startTime))
 	}
 	args = append(args,
