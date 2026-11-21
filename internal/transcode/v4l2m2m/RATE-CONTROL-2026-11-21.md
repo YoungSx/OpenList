@@ -1,5 +1,9 @@
 # Rate-control and frame-clock acceptance
 
+Historical acceptance for the recorded image. The private FFmpeg rate-limit
+experiment is retired; current development targets unmodified official FFmpeg.
+See [current compatibility](README.md).
+
 Runtime source: `7da9ab4e8d7089285467cae4a3442178b92256fd`.
 Image: `youngsx/openlist-onecloud:v4.2.10-v4l2m2m-7da9ab4`, ARMv7.
 The OneCloud ran its existing Linux 5.15.79-meson and 64 MiB CMA. Tests used

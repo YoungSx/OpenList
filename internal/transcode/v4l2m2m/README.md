@@ -82,48 +82,44 @@ The opt-in policies use the existing profile, worker and chunk paths:
 | Setting | Behavior |
 | --- | --- |
 | `transcode_rate_policy=warn` | Default target tracking and overshoot warning; playback continues. |
-| `transcode_rate_policy=fail` | Require the video peak/buffer envelope and report an encode failure when the driver rejects output. |
-| `transcode_rate_policy=downscale` | Probe isolated HLS output before publication, then keep one selected size for the job. |
+| `transcode_rate_policy=fail` | Require native peak/buffer support; unsupported V4L2 paths fail explicitly. |
+| `transcode_rate_policy=downscale` | Probe measured HLS output before publication, then keep one selected size. |
 | `transcode_peak_bitrate` | Video bits per second; blank uses the requested target. |
 | `transcode_buffer_size` | Video buffer in **bits**, like FFmpeg `-bufsize`; blank allows two seconds of peak rate. |
 
-Peak must be at least the positive target, and buffer must hold at least 8192
-bits. For V4L2 H.264, `fail` and `downscale` require the configured FFmpeg to
-expose `-v4l2_rate_limit`. The builder passes that option, maxrate and bufsize;
-the wrapper transactionally sets BITRATE, BITRATE_PEAK and H264_CPB_SIZE and
-fails if the device rejects them. The independent
-[FFmpeg patch](https://github.com/YoungSx/onecloud-meson8b-vcodec/blob/main/patches/ffmpeg-7.0.2-v4l2-rate-limits.patch)
-is for 7.0.2 after its drain patch. Other V4L2 encoder formats do not have this
-mapping. Validation errors never produce an unconstrained command.
+Official unmodified FFmpeg is the compatibility target. The private
+`v4l2_rate_limit` experiment is retired. The configured executable is checked
+only for standard decoder/encoder wrappers; no private capability probe runs.
+Standard `-b:v`, `-qmin/-qmax`, `-g` and output frame rate are supported by the
+upstream V4L2 wrapper. Encoder-specific help lists private options only.
 
-The Meson8b driver uses KiB (1024 bytes) for H264_CPB_SIZE. Buffer bits are
-rounded down by division by 8192, so the effective capacity does not exceed
-the request: `2M` bits becomes 244 KiB (249856 bytes). New sessions start with
-full credits, then refill on the negotiated media clock. Oversized access units
-fail before publication. This is a VBR envelope with allowed bursts, not
-strict CBR, HRD, a per-segment limit or an audio/TS/network cap.
+For V4L2, `warn` uses target tracking. `downscale` with peak/buffer fields left
+blank probes actual HLS output and selects a stable geometry before publication.
+This does not claim a CPB/peak envelope. `fail` or explicit peak/buffer limits
+are rejected on this path because the checked official wrappers do not forward
+those controls; use an encoder with native support when those are required.
+The direct V4L2 driver controls remain available to other clients. Other native
+encoder backends retain maxrate/bufsize handling.
 
-Downscale probes up to six media seconds (less for a short source), with all
-candidates sharing a 90-second wall-time budget. First-playlist waits include
-that probe window in addition to the existing 30 seconds. It tries the requested size, then smaller
-aspect-preserving widths among 1280/854/640/426/320. It requires known geometry,
-complete output and a measured HLS average within 125% of video plus audio
-target, allowing muxing overhead. Probe files are private temporary output and
-are removed on success, failure or cancellation. A selected profile preserves
-its name/cache URLs; `effective_profile` reports the chosen size locally and
-in the standalone worker's finish callback. Chunks and reactivated jobs reuse
-it. A later complex scene can still exceed the budget and fail; the sample
-does not predict future peaks. Failed jobs return errors for missing segments
-and playlists without automatic reactivation; completed cached segments remain
-readable. A partially encoded chunk is not retried with another encoder.
+Downscale probes up to six media seconds with all candidates sharing a
+90-second wall-time budget. First-playlist waits include that budget. Candidates
+preserve aspect ratio, never upscale, and try the requested size then smaller
+widths among 1280/854/640/426/320. Complete HLS output must average within 125%
+of target video plus audio, allowing muxing overhead. Temporary probe files are
+removed on every exit. The selected profile keeps its cache identity and is
+reused across chunks and reactivation. Future scenes can exceed the measured
+rate; this policy is not a network cap or a prediction of future output.
 
-The candidate image keeps stock FFmpeg and adds the independent test tool at
-`/opt/openlist/ffmpeg-v4l2`. To use these V4L2 limits, explicitly configure
-`transcode_ffmpeg_path` to that path (or provide a compatible full FFmpeg),
-plus the corresponding driver. The tool supports files/HTTP, H.264/HEVC/AAC
-and HLS/MPEG-TS. It lacks HTTPS/TLS, libx264/libx265 and full format coverage;
-it is not a general replacement for stock FFmpeg. The standalone worker uses
-the same choice through `-ffmpeg`.
+Use stock FFmpeg from the existing image. A shared-buffer raw NV12 crash,
+drain truncation or incorrectly propagated terminal error requires an independent
+reproducer before any optional bug patch is used. Do not deploy the earlier
+private-extension test image as the official compatibility solution.
+
+官方原版 FFmpeg 是兼容目标，不使用私有码控扩展。V4L2 `warn` 跟踪目标，
+`downscale` 在峰值/缓冲留空时按实测 HLS 平均码率试编码，选择尺寸并在
+任务中保持稳定；它不保证 CPB 或未来场景峰值。显式峰值/缓冲预算和
+`fail` 在该路径清晰报错，原生支持预算的其他编码器仍可使用。只有明确
+复现的 bug 才保留可选最小修复，不以 FFmpeg fork 弥补功能。
 
 The play endpoint first filters size/extension, then checks source codec and
 bitrate again after ffprobe before submitting a job. An unknown probe field

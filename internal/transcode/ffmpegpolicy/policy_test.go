@@ -17,7 +17,7 @@ import (
 func TestDownscaleBeforePublication(t *testing.T) {
 	p := ffmpegargs.Profile{Name: "source", VideoCodec: "h264", VideoBitrate: "1000k", AudioBitrate: "96k", RatePolicy: "downscale"}
 	probe := ffmpegargs.SourceProbe{Width: 1920, Height: 1080, Duration: 84}
-	caps := v4l2m2m.Caps{Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}, RateLimits: true}
+	caps := v4l2m2m.Caps{Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}}
 	var scales, directories []string
 	run := func(_ context.Context, _ string, args []string, _ io.Writer) error {
 		scale := ""
@@ -49,7 +49,7 @@ func TestDownscaleBeforePublication(t *testing.T) {
 }
 
 func TestDownscaleDoesNotIgnoreMappingAtSmallerSizes(t *testing.T) {
-	p := ffmpegargs.Profile{VideoCodec: "h264", VideoBitrate: "1000k", RatePolicy: "downscale"}
+	p := ffmpegargs.Profile{VideoCodec: "h264", VideoBitrate: "1000k", RatePolicy: "downscale", PeakBitrate: "1000k"}
 	probe := ffmpegargs.SourceProbe{Width: 3840, Height: 2160, Duration: 6}
 	caps := v4l2m2m.Caps{Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}}
 	calls := 0
@@ -60,7 +60,7 @@ func TestDownscaleDoesNotIgnoreMappingAtSmallerSizes(t *testing.T) {
 		}
 		return errors.New("software encoding failed")
 	}
-	if _, err := Prepare(context.Background(), "source", probe, p, "ffmpeg", caps, run); err == nil || !strings.Contains(err.Error(), "mapping") || calls != 1 {
+	if _, err := Prepare(context.Background(), "source", probe, p, "ffmpeg", caps, run); err == nil || !strings.Contains(err.Error(), "does not map") || calls != 1 {
 		t.Fatalf("candidate mapping: calls=%d error=%v", calls, err)
 	}
 }
@@ -94,11 +94,11 @@ func TestRequiredMappingAndCancellation(t *testing.T) {
 	p := ffmpegargs.Profile{VideoCodec: "h264", VideoBitrate: "1000k", RatePolicy: "fail"}
 	probe := ffmpegargs.SourceProbe{Width: 640, Height: 360}
 	caps := v4l2m2m.Caps{Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}}
-	if _, err := Prepare(context.Background(), "source", probe, p, "ffmpeg", caps, nil); err == nil || !strings.Contains(err.Error(), "mapping") {
+	if _, err := Prepare(context.Background(), "source", probe, p, "ffmpeg", caps, nil); err == nil || !strings.Contains(err.Error(), "does not map") {
 		t.Fatalf("missing mapping was ignored: %v", err)
 	}
 	p.RatePolicy = "downscale"
-	caps.RateLimits = true
+	caps = v4l2m2m.Caps{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := Prepare(ctx, "source", probe, p, "ffmpeg", caps, nil); !errors.Is(err, context.Canceled) {

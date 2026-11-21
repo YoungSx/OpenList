@@ -42,8 +42,8 @@ func Prepare(ctx context.Context, source string, probe ffmpegargs.SourceProbe,
 		return profile, nil
 	}
 	if caps.Encoder(profile.VideoCodec, probe.Width, probe.Height, profile.Scale) != "" &&
-		(!caps.RateLimits || (!strings.EqualFold(profile.VideoCodec, "h264") && profile.VideoCodec != "")) {
-		return profile, fmt.Errorf("required V4L2 peak/CPB mapping is unavailable; use a compatible FFmpeg/driver or software encoder")
+		(profile.RatePolicy == "fail" || profile.PeakBitrate != "" || profile.BufferSize != "") {
+		return profile, fmt.Errorf("official FFmpeg's V4L2 encoder does not map peak/buffer limits; use warn or an encoder with native rate-limit support")
 	}
 	if profile.RatePolicy == "fail" {
 		return profile, nil

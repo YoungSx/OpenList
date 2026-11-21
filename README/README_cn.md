@@ -25,8 +25,8 @@
 本分支增加通用 stateful V4L2 转码，已在玩客云 S805 验证。选择 `v4l2m2m`
 并将编解码设备映射到容器。源帧率决定 CFR/GOP 时间模型，HLS 按实际切片
 字节数与时长声明带宽；视频码率是目标，设备可能超出该目标。默认 `warn`
-继续播放，显式 `fail` 要求兼容的峰值/缓冲控件，`downscale` 在首片发布前
-试编码并在同一任务中固定选定尺寸。参见
+继续播放，以官方原版 FFmpeg 为目标；`downscale` 在首片发布前按实测
+码率试编码并固定尺寸，V4L2 显式峰值/缓冲预算清晰报错，不依赖私有扩展。参见
 [配置与码率语义](../internal/transcode/v4l2m2m/README.md)和
 [实机验收](../internal/transcode/v4l2m2m/VALIDATION.md)。
 

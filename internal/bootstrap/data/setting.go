@@ -328,7 +328,7 @@ func InitialSettings() []model.SettingItem {
 		{Key: conf.TranscodeOutputBitrate, Value: "4000k", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `输出目标视频码率，例如 4000k / 6M。V4L2 设备可能无法达到该目标；请查看实际切片带宽与任务警告，受限网络应降低分辨率/帧率或改用软件编码`},
 		{Key: conf.TranscodeRatePolicy, Value: "warn", Type: conf.TypeSelect, Options: "warn,fail,downscale", Group: model.TRANSCODE, Flag: model.PRIVATE,
-			Help: `warn=继续播放并告警；fail=强制视频峰值/缓冲预算，超额失败；downscale=开始播放前有界试编码并降低尺寸。V4L2 约束需要带 v4l2_rate_limit 的 FFmpeg 和支持峰值/CPB 的驱动；不代表严格 CBR/HRD`},
+			Help: `warn=继续播放并告警；fail=强制视频峰值/缓冲预算，超额失败；downscale=开始播放前有界试编码并降低尺寸。官方 FFmpeg 的 V4L2 编码器未映射峰值/缓冲控件，此路径支持 warn 或按实测平均码率试编码的 downscale（峰值/缓冲留空）；fail/显式预算请选择原生支持预算的编码器`},
 		{Key: conf.TranscodePeakBitrate, Value: "", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,
 			Help: `视频峰值预算，例如 4000k；留空使用目标视频码率，仅 fail/downscale 生效`},
 		{Key: conf.TranscodeBufferSize, Value: "", Type: conf.TypeString, Group: model.TRANSCODE, Flag: model.PRIVATE,

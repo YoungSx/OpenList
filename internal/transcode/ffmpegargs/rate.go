@@ -25,7 +25,7 @@ func ParseBitrate(value string) (int64, error) {
 	return n * multiplier, nil
 }
 
-// RateLimits returns a video peak and buffer envelope, not an HRD/CBR promise.
+// RateLimits validates requested limits; the encoder decides their supported mapping.
 func RateLimits(profile Profile) (int64, int64, error) {
 	if profile.RatePolicy != "" && profile.RatePolicy != "warn" && profile.RatePolicy != "fail" && profile.RatePolicy != "downscale" {
 		return 0, 0, fmt.Errorf("unknown rate policy %q", profile.RatePolicy)

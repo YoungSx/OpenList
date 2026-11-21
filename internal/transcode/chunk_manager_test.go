@@ -161,7 +161,7 @@ func TestResumedJobKeepsSelectedProfile(t *testing.T) {
 	}
 	t.Cleanup(op.Cache.ClearAll)
 	caps := s805
-	caps.RateLimits = true
+	caps.Encode = nil
 	withV4L2M2M(t, caps)
 	manager := &Manager{Scheduler: NewScheduler(NewWorkerRegistry()), Cache: NewCache(t.TempDir(), 1)}
 	manager.Chunks = NewChunkManager(manager)

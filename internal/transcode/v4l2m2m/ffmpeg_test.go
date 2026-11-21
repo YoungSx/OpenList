@@ -34,8 +34,7 @@ func TestDetectForFFmpegRefreshesChangedExecutable(t *testing.T) {
 	path, calls := filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "calls")
 	script := "#!/bin/sh\necho called >> '" + calls + "'\ncase \"$2\" in\n" +
 		"-decoders) printf 'Decoders:\\n V..... hevc_v4l2m2m decoder\\n';;\n" +
-		"-encoders) printf 'Encoders:\\n V..... h264_v4l2m2m encoder\\n';;\n" +
-		"-h) printf ' -v4l2_rate_limit Require peak bitrate and CPB controls\\n';;\nesac\n"
+		"-encoders) printf 'Encoders:\\n V..... h264_v4l2m2m encoder\\n';;\nesac\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -43,11 +42,11 @@ func TestDetectForFFmpegRefreshesChangedExecutable(t *testing.T) {
 		caps := DetectForFFmpeg(path)
 		if caps.Decoder("hevc", "yuv420p", 1920, 1080) != "hevc_v4l2m2m" ||
 			caps.Decoder("h264", "yuv420p", 1920, 1080) != "" ||
-			caps.Encoder("h264", 1920, 1080, "") != "h264_v4l2m2m" || !caps.RateLimits {
+			caps.Encoder("h264", 1920, 1080, "") != "h264_v4l2m2m" {
 			t.Fatalf("device and executable capabilities not intersected: %s", caps)
 		}
 	}
-	if contents, err := os.ReadFile(calls); err != nil || string(contents) != "called\ncalled\ncalled\n" {
+	if contents, err := os.ReadFile(calls); err != nil || string(contents) != "called\ncalled\n" {
 		t.Fatalf("FFmpeg lists were not cached: %q (%v)", contents, err)
 	}
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'Decoders:\\nEncoders:\\n'\n"), 0o700); err != nil {

@@ -308,6 +308,26 @@ func firstSegmentTimeout(job *transcode.Job) time.Duration {
 	return timeout
 }
 
+// TCStatus returns a read-only playback snapshot.
+func TCStatus(c *gin.Context) {
+	job, ok := transcode.Default().Scheduler.Get(c.Param("job"))
+	if !ok {
+		c.String(http.StatusNotFound, "job not found")
+		return
+	}
+	if !tokenMatches(job.PlayToken, c.Param("token")) {
+		c.String(http.StatusForbidden, "bad token")
+		return
+	}
+	status, jobError, warning, profile := job.PlaybackStatus()
+	c.Header("Cache-Control", "no-store")
+	// FFmpeg diagnostics may contain signed source URLs; keep details admin-only.
+	if jobError != "" {
+		jobError = "transcode failed; check server diagnostics"
+	}
+	c.JSON(http.StatusOK, gin.H{"status": status, "error": jobError, "warning": warning, "effective_profile": profile})
+}
+
 // TCMaster GET /tc/:job/:token/master.m3u8
 func TCMaster(c *gin.Context) {
 	jobID := c.Param("job")

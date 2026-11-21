@@ -102,8 +102,8 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 		vcodec = enc
 	}
 	if peak > 0 && strings.HasSuffix(vcodec, "_v4l2m2m") &&
-		(vcodec != "h264_v4l2m2m" || !v4l2.RateLimits) {
-		return nil, fmt.Errorf("required V4L2 peak/CPB mapping is unavailable; use a compatible FFmpeg/driver or software encoder")
+		(profile.RatePolicy == "fail" || profile.PeakBitrate != "" || profile.BufferSize != "") {
+		return nil, fmt.Errorf("official FFmpeg's V4L2 encoder does not map peak/buffer limits; use warn or an encoder with native rate-limit support")
 	}
 	args = append(args, "-c:v", vcodec)
 	switch {
@@ -122,10 +122,7 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 			args = append(args, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
 		}
 	}
-	if peak > 0 {
-		if strings.HasSuffix(vcodec, "_v4l2m2m") {
-			args = append(args, "-v4l2_rate_limit", "1")
-		}
+	if peak > 0 && !strings.HasSuffix(vcodec, "_v4l2m2m") {
 		args = append(args, "-maxrate", strconv.FormatInt(peak, 10),
 			"-bufsize", strconv.FormatInt(buffer, 10))
 	}

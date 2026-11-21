@@ -2,6 +2,7 @@ package handles
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,44 @@ func TestTranscodeReadsDoNotRestartTerminalJobs(t *testing.T) {
 			if tc.code == http.StatusInternalServerError && !strings.Contains(response.Body.String(), "rate budget exceeded") {
 				t.Fatalf("encoding failure was lost: %s", response.Body.String())
 			}
+		}
+	}
+}
+
+func TestPlaybackStatusDoesNotExposeWorkerCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mgr := transcode.Default()
+	old := mgr.Scheduler
+	mgr.Scheduler = transcode.NewScheduler(transcode.NewWorkerRegistry())
+	t.Cleanup(func() { mgr.Scheduler = old })
+	job := transcode.NewJob()
+	job.SourceURL = "https://private.test/video?sign=private"
+	job.Profiles = []transcode.Profile{{Name: "source"}}
+	job = mgr.Scheduler.Submit(job)
+	if err := mgr.Scheduler.Finish(&transcode.FinishRequest{JobID: job.ID, Status: transcode.JobFailed, Error: job.SourceURL}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{"bad", job.PlayToken} {
+		out := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(out)
+		ctx.Request = httptest.NewRequest("GET", "/status", nil)
+		ctx.Params = gin.Params{{Key: "job", Value: job.ID}, {Key: "token", Value: token}}
+		TCStatus(ctx)
+		if token == "bad" {
+			if out.Code != 403 {
+				t.Fatal(out.Code)
+			}
+			continue
+		}
+		var value map[string]any
+		if err := json.Unmarshal(out.Body.Bytes(), &value); err != nil {
+			t.Fatal(err)
+		}
+		if out.Code != 200 || value["status"] != "failed" || out.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal(out.Body.String())
+		}
+		if strings.Contains(out.Body.String(), "private") || strings.Contains(out.Body.String(), job.CallbackToken) {
+			t.Fatal("status leaked source or worker credential")
 		}
 	}
 }

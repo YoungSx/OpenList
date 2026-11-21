@@ -141,6 +141,18 @@ func (j *Job) GetError() string {
 	return j.Error
 }
 
+// PlaybackStatus exposes diagnostics without worker credentials or source URLs.
+func (j *Job) PlaybackStatus() (JobStatus, string, string, *Profile) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	var profile *Profile
+	if j.EffectiveProfile != nil {
+		selected := *j.EffectiveProfile
+		profile = &selected
+	}
+	return j.Status, j.Error, j.Warning, profile
+}
+
 // MarkReady 标记任务已可播放（首切片就绪）
 func (j *Job) MarkReady() {
 	// Completion also takes mu before readyOnce.
