@@ -1,5 +1,8 @@
 # Compatibility changes and hardware evidence
 
+See [peak and buffer acceptance](RATE-BUDGET-VALIDATION.md) for the newer
+local and standalone-worker results.
+
 The [2026-11-21 rate-control acceptance](RATE-CONTROL-2026-11-21.md) covers
 the final `7da9ab4` image, measured bandwidth, CFR/fractional timing, short tails,
 cached reads and sought hardware timestamps. The results below are earlier
