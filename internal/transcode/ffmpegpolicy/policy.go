@@ -17,6 +17,8 @@ import (
 
 type Run func(context.Context, string, []string, io.Writer) error
 
+const ProbeTimeout = 90 * time.Second
+
 type diagnostic struct{ data []byte }
 
 func (b *diagnostic) Write(p []byte) (int, error) {
@@ -55,6 +57,8 @@ func Prepare(ctx context.Context, source string, probe ffmpegargs.SourceProbe,
 		return profile, err
 	}
 	defer os.RemoveAll(dir)
+	ctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	defer cancel()
 	var last error
 	for index, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
@@ -75,10 +79,8 @@ func Prepare(ctx context.Context, source string, probe ffmpegargs.SourceProbe,
 			last = err
 			continue
 		}
-		attempt, cancel := context.WithTimeout(ctx, 90*time.Second)
 		stderr := &diagnostic{}
-		err = run(attempt, executable, args, stderr)
-		cancel()
+		err = run(ctx, executable, args, stderr)
 		if err != nil {
 			last = fmt.Errorf("rate probe %s failed: %v: %s", candidate.Scale, err, string(stderr.data))
 			continue

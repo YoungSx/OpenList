@@ -103,8 +103,9 @@ full credits, then refill on the negotiated media clock. Oversized access units
 fail before publication. This is a VBR envelope with allowed bursts, not
 strict CBR, HRD, a per-segment limit or an audio/TS/network cap.
 
-Downscale probes up to six media seconds (less for a short source), with each
-attempt limited to 90 wall seconds. It tries the requested size, then smaller
+Downscale probes up to six media seconds (less for a short source), with all
+candidates sharing a 90-second wall-time budget. First-playlist waits include
+that probe window in addition to the existing 30 seconds. It tries the requested size, then smaller
 aspect-preserving widths among 1280/854/640/426/320. It requires known geometry,
 complete output and a measured HLS average within 125% of video plus audio
 target, allowing muxing overhead. Probe files are private temporary output and

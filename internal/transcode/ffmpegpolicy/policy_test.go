@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegargs"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/v4l2m2m"
@@ -102,5 +103,28 @@ func TestRequiredMappingAndCancellation(t *testing.T) {
 	cancel()
 	if _, err := Prepare(ctx, "source", probe, p, "ffmpeg", caps, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled probe ran: %v", err)
+	}
+}
+
+func TestCandidatesShareOneProbeDeadline(t *testing.T) {
+	p := ffmpegargs.Profile{VideoCodec: "h264", VideoBitrate: "1000k", RatePolicy: "downscale"}
+	probe := ffmpegargs.SourceProbe{Width: 1920, Height: 1080, Duration: 10}
+	var deadline time.Time
+	calls := 0
+	run := func(ctx context.Context, _ string, _ []string, _ io.Writer) error {
+		value, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("probe has no wall-time limit")
+		}
+		if calls == 0 {
+			deadline = value
+		} else if !value.Equal(deadline) {
+			t.Fatal("another candidate restarted the probe budget")
+		}
+		calls++
+		return errors.New("unreachable rate")
+	}
+	if _, err := Prepare(context.Background(), "source", probe, p, "ffmpeg", v4l2m2m.Caps{}, run); err == nil || calls != 6 {
+		t.Fatalf("candidate deadline: calls=%d error=%v", calls, err)
 	}
 }

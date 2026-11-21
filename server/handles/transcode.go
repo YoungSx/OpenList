@@ -20,6 +20,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/setting"
 	"github.com/OpenListTeam/OpenList/v4/internal/sign"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode"
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegpolicy"
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 	"github.com/gin-gonic/gin"
 )
@@ -295,6 +296,14 @@ func resolveLocalFilePath(rawPath string) (string, bool) {
 // 播放端：/tc/:job/:token/...  Master/Variant playlist & 切片
 // ============================================================
 
+func firstSegmentTimeout(job *transcode.Job) time.Duration {
+	timeout := 30 * time.Second
+	if len(job.Profiles) > 0 && job.Profiles[0].RatePolicy == "downscale" {
+		timeout += ffmpegpolicy.ProbeTimeout
+	}
+	return timeout
+}
+
 // TCMaster GET /tc/:job/:token/master.m3u8
 func TCMaster(c *gin.Context) {
 	jobID := c.Param("job")
@@ -323,7 +332,7 @@ func TCMaster(c *gin.Context) {
 			}
 		case <-c.Request.Context().Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-time.After(firstSegmentTimeout(job)):
 			c.String(http.StatusGatewayTimeout, "timeout waiting first measured segment")
 			return
 		}
@@ -337,7 +346,7 @@ func TCMaster(c *gin.Context) {
 }
 
 // TCPlaylist GET /tc/:job/:token/:profile/playlist.m3u8
-// 等待首切片就绪后返回；阻塞最多 30s
+// 等待首切片就绪后返回；降档任务包含试编码窗口。
 func TCPlaylist(c *gin.Context) {
 	jobID := c.Param("job")
 	token := c.Param("token")
@@ -379,7 +388,7 @@ func TCPlaylist(c *gin.Context) {
 	if !quotaBlocked {
 		select {
 		case <-job.WaitReady():
-		case <-time.After(30 * time.Second):
+		case <-time.After(firstSegmentTimeout(job)):
 			c.String(http.StatusGatewayTimeout, "timeout waiting first segment")
 			return
 		}
