@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,6 +68,54 @@ func chunkFromArgs(t *testing.T, args []string) int {
 	}
 	t.Fatalf("no chunk playlist in %v", args)
 	return -1
+}
+
+func TestChunkSessionIncludesSubsecondTail(t *testing.T) {
+	for key, value := range map[string]string{
+		conf.TranscodeSegmentDuration: "2", conf.TranscodeChunkDurationSec: "12",
+		conf.TranscodeFFmpegPath: "ffmpeg", conf.TranscodeChunkPrefetch: "false",
+		conf.TranscodeMaxChunkConcurrency: "1", conf.TranscodeChunkIdleSec: "60",
+		conf.TranscodeJobTimeoutMin: "120",
+	} {
+		op.Cache.SetSetting(key, &model.SettingItem{Key: key, Value: value})
+	}
+	t.Cleanup(op.Cache.ClearAll)
+	previous := runProcess
+	runProcess = func(context.Context, string, []string, io.Writer) error { return nil }
+	t.Cleanup(func() { runProcess = previous })
+	for _, tc := range []struct {
+		duration       float64
+		lastSeq, chunk int
+		tailDuration   float64
+	}{
+		{.5, 0, 0, .5},
+		{6.5, 3, 0, 6.5},
+		{12.5, 6, 1, .5},
+	} {
+		cm := NewChunkManager(nil)
+		job := NewJob()
+		job.ID = "tail"
+		job.Probe.Duration = tc.duration
+		session, err := cm.StartSession(job, Profile{Name: "source"}, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cm.findChunkBySeq(session, tc.lastSeq); got != tc.chunk {
+			t.Fatalf("duration %v lost segment %d: chunk=%d", tc.duration, tc.lastSeq, got)
+		}
+		if got := session.chunks[tc.chunk]; got.EndSeq != tc.lastSeq+1 || got.Duration != tc.tailDuration {
+			t.Fatalf("wrong tail metadata: %+v", got)
+		}
+		waitFor(t, "initial chunk done", func() bool { return chunkState(session, 0) == ChunkDone })
+		close(cm.stopCh)
+	}
+	for _, duration := range []float64{math.NaN(), math.Inf(1), -1, float64(maxSegmentSeq+2) * 2} {
+		job := NewJob()
+		job.Probe.Duration = duration
+		if _, err := NewChunkManager(nil).StartSession(job, Profile{}, t.TempDir()); err == nil {
+			t.Fatalf("invalid duration %v accepted", duration)
+		}
+	}
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {

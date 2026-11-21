@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,8 +154,8 @@ func sessionKey(jobID, profile string) string { return jobID + ":" + profile }
 // 返回的 ChunkSession.allDoneCh 在所有切片都转完时关闭
 func (cm *ChunkManager) StartSession(job *Job, profile Profile, outDir string) (*ChunkSession, error) {
 	totalDur := job.Probe.Duration
-	if totalDur <= 0 {
-		return nil, fmt.Errorf("chunk session requires probe.duration > 0")
+	if totalDur <= 0 || math.IsNaN(totalDur) || math.IsInf(totalDur, 0) {
+		return nil, fmt.Errorf("chunk session requires finite positive probe.duration")
 	}
 	segDur := setting.GetInt(conf.TranscodeSegmentDuration, 6)
 	if segDur <= 0 {
@@ -211,10 +212,11 @@ func (cm *ChunkManager) StartSession(job *Job, profile Profile, outDir string) (
 
 	// 预先按总时长生成所有 chunk 元数据（不启动）
 	segsPerChunk := chunkDur / segDur
-	totalSegs := int(totalDur) / segDur
-	if int(totalDur)%segDur > 0 {
-		totalSegs++
+	segments := math.Ceil(totalDur / float64(segDur))
+	if segments > maxSegmentSeq+1 {
+		return nil, fmt.Errorf("chunk session exceeds segment limit")
 	}
+	totalSegs := int(segments)
 	chunkCount := totalSegs / segsPerChunk
 	if totalSegs%segsPerChunk > 0 {
 		chunkCount++

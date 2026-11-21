@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -118,6 +119,41 @@ func TestRateWarningCanBeReadWhileEncoding(t *testing.T) {
 		}
 	}
 	done.Wait()
+}
+
+func TestReadinessAndFinishWhileJobIsBeingRead(t *testing.T) {
+	job := NewJob()
+	job.ID = "job"
+	scheduler := NewScheduler(nil)
+	scheduler.jobs[job.ID] = job
+	// A JSON reader holds this lock while readiness and completion arrive.
+	job.mu.RLock()
+	finished := make(chan error, 1)
+	go func() {
+		finished <- scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFinished})
+	}()
+	runtime.Gosched()
+	time.Sleep(time.Millisecond)
+	ready := make(chan struct{})
+	go func() { job.MarkReady(); close(ready) }()
+	runtime.Gosched()
+	time.Sleep(time.Millisecond)
+	job.mu.RUnlock()
+	for _, done := range []<-chan struct{}{ready, job.WaitReady()} {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("readiness and completion deadlocked behind a job reader")
+		}
+	}
+	select {
+	case err := <-finished:
+		if err != nil || job.GetStatus() != JobFinished {
+			t.Fatalf("completion was lost: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("completion did not return")
+	}
 }
 
 func TestSeekingDoesNotWakeUnrelatedSegmentWaiter(t *testing.T) {

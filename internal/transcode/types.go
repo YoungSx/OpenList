@@ -136,12 +136,13 @@ func (j *Job) GetStatus() JobStatus {
 
 // MarkReady 标记任务已可播放（首切片就绪）
 func (j *Job) MarkReady() {
+	// Completion also takes mu before readyOnce.
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	j.readyOnce.Do(func() {
-		j.mu.Lock()
 		if j.Status == JobRunning || j.Status == JobPending {
 			j.Status = JobReady
 		}
-		j.mu.Unlock()
 		close(j.readyCh)
 	})
 }
