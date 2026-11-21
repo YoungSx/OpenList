@@ -20,6 +20,14 @@
 - [行为准则](../CODE_OF_CONDUCT.md)
 - [许可证](../LICENSE)
 
+## V4L2 M2M 分支
+
+本分支增加通用 stateful V4L2 转码，已在玩客云 S805 验证。选择 `v4l2m2m`
+并将编解码设备映射到容器。源帧率决定 CFR/GOP 时间模型，HLS 按实际切片
+字节数与时长声明带宽；视频码率是目标，设备可能超出该目标。参见
+[配置与码率语义](../internal/transcode/v4l2m2m/README.md)和
+[实机验收](../internal/transcode/v4l2m2m/VALIDATION.md)。
+
 ## 免责声明
 
 OpenList 是一个由 OpenList 团队独立维护的开源项目，遵循 AGPL-3.0 许可证，致力于保持完整的代码开放性和修改透明性。

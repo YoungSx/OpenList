@@ -361,7 +361,8 @@ func TCPlaylist(c *gin.Context) {
 	// 配额/队列已满时不再起新的 ffmpeg，但 playlist 与已缓存的切片仍应可读：
 	// 这里只记下 quotaBlocked，交给切片请求在「缓存也没有」时才返回 429。
 	quotaBlocked := false
-	if st := job.GetStatus(); st == transcode.JobCancelled || st == transcode.JobFinished || st == transcode.JobFailed {
+	if st := job.GetStatus(); (st == transcode.JobCancelled || st == transcode.JobFinished || st == transcode.JobFailed) &&
+		mgr.Cache.SegmentCount(jobID, profile) == 0 {
 		if _, rerr := mgr.Scheduler.Reactivate(jobID); rerr == nil {
 			fmt.Printf("[transcode] reactivate job %s on playlist request (was %s)\n", jobID, st)
 		} else if errors.Is(rerr, transcode.ErrUserQuota) || errors.Is(rerr, transcode.ErrQueueFull) {
@@ -422,18 +423,6 @@ func TCSegment(c *gin.Context) {
 		c.String(http.StatusBadRequest, "bad profile")
 		return
 	}
-	// 【关键】job 之前因 idle 被 cancel 时，复用同一 jobID/token 重新入队启动转码。
-	// 这样浏览器持有的旧 master.m3u8 + 切片 URL 仍然有效，暂停再继续也不会 404。
-	// 配额/队列已满时不重新起 ffmpeg，但已缓存的切片依然要能命中（回看已转完的视频）。
-	quotaBlocked := false
-	if st := job.GetStatus(); st == transcode.JobCancelled || st == transcode.JobFinished || st == transcode.JobFailed {
-		if _, rerr := mgr.Scheduler.Reactivate(jobID); rerr == nil {
-			fmt.Printf("[transcode] reactivate job %s on segment request (was %s)\n", jobID, st)
-		} else if errors.Is(rerr, transcode.ErrUserQuota) || errors.Is(rerr, transcode.ErrQueueFull) {
-			quotaBlocked = true
-			fmt.Printf("[transcode] reactivate job %s on segment request rejected (%v), serving from cache only\n", jobID, rerr)
-		}
-	}
 	// seg-N.ts
 	name := strings.TrimSuffix(strings.TrimPrefix(segName, "seg-"), ".ts")
 	seq, err := strconv.Atoi(name)
@@ -442,19 +431,25 @@ func TCSegment(c *gin.Context) {
 		return
 	}
 	cache := mgr.Cache
-	// 【智能调度】触发对应 chunk 的 ffmpeg 启动（如已运行则只更新 LastAccess）
-	// 这是用户拖动进度条到任意位置时能快速响应的关键。
-	// 配额已满时不能触发新的 ffmpeg，否则「限制并发」就没有意义了。
-	if mgr.Chunks != nil && !quotaBlocked {
-		chunkIdx := mgr.Chunks.EnsureChunkRunningForSeg(jobID, profile, seq)
-		fmt.Printf("[tc-segment] req seq=%d chunk=%d job=%s\n", seq, chunkIdx, jobID)
-	}
 	info, err := cache.GetSegment(jobID, profile, seq)
 	if err != nil {
+		// Cached immutable segments must not restart and overwrite their encoder output.
+		quotaBlocked := false
+		if st := job.GetStatus(); st == transcode.JobCancelled || st == transcode.JobFinished || st == transcode.JobFailed {
+			if _, rerr := mgr.Scheduler.Reactivate(jobID); rerr == nil {
+				fmt.Printf("[transcode] reactivate job %s on segment request (was %s)\n", jobID, st)
+			} else if errors.Is(rerr, transcode.ErrUserQuota) || errors.Is(rerr, transcode.ErrQueueFull) {
+				quotaBlocked = true
+			}
+		}
 		if quotaBlocked {
 			// 配额已满且该切片不在缓存里：只能拒绝，让前端降级为直链播放
 			c.String(http.StatusTooManyRequests, "too many active transcode jobs")
 			return
+		}
+		if mgr.Chunks != nil {
+			chunkIdx := mgr.Chunks.EnsureChunkRunningForSeg(jobID, profile, seq)
+			fmt.Printf("[tc-segment] req seq=%d chunk=%d job=%s\n", seq, chunkIdx, jobID)
 		}
 		// 等待
 		waitStart := time.Now()

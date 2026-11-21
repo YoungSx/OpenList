@@ -20,6 +20,15 @@
 - [CODE OF CONDUCT](./CODE_OF_CONDUCT.md)
 - [LICENSE](./LICENSE)
 
+## V4L2 M2M fork
+
+This branch adds generic stateful V4L2 transcoding, tested on the OneCloud S805.
+Select `v4l2m2m` and map the codec devices into the container. Source frame rates
+drive CFR/GOP timing, and HLS bandwidth follows measured segment bytes and durations.
+Video bitrate is a target; devices can exceed it. See the
+[setup and rate semantics](internal/transcode/v4l2m2m/README.md) and
+[hardware validation](internal/transcode/v4l2m2m/VALIDATION.md).
+
 ## Disclaimer
 
 OpenList is an open-source project independently maintained by the OpenList Team, following the AGPL-3.0 license and committed to maintaining complete code openness and modification transparency.
