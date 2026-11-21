@@ -208,14 +208,17 @@ const (
 	MediaStrmTemplate        = "media_strm_template"                // STRM 内容模板
 
 	// transcode (云端/本地 FFmpeg 转码)
-	TranscodeEnabled            = "transcode_enabled"              // 总开关，默认关
-	TranscodeMinSizeGB          = "transcode_min_size_gb"          // 文件大于多少 GB 才转码
-	TranscodeMinBitrateMbps     = "transcode_min_bitrate_mbps"     // 视频码率高于多少 Mbps 才转码（0=不限）
-	TranscodeSourceCodecs       = "transcode_source_codecs"        // 仅对这些源编码进行转码
-	TranscodeSourceExtensions   = "transcode_source_extensions"    // 仅对这些后缀进行转码
-	TranscodeOutputFormat       = "transcode_output_format"        // 输出封装格式 hls/dash/mp4
-	TranscodeOutputCodec        = "transcode_output_codec"         // 重新编码的视频编码
-	TranscodeOutputBitrate      = "transcode_output_bitrate"       // 输出视频码率，例如 4000k
+	TranscodeEnabled            = "transcode_enabled"           // 总开关，默认关
+	TranscodeMinSizeGB          = "transcode_min_size_gb"       // 文件大于多少 GB 才转码
+	TranscodeMinBitrateMbps     = "transcode_min_bitrate_mbps"  // 视频码率高于多少 Mbps 才转码（0=不限）
+	TranscodeSourceCodecs       = "transcode_source_codecs"     // 仅对这些源编码进行转码
+	TranscodeSourceExtensions   = "transcode_source_extensions" // 仅对这些后缀进行转码
+	TranscodeOutputFormat       = "transcode_output_format"     // 输出封装格式 hls/dash/mp4
+	TranscodeOutputCodec        = "transcode_output_codec"      // 重新编码的视频编码
+	TranscodeOutputBitrate      = "transcode_output_bitrate"    // 输出视频码率，例如 4000k
+	TranscodeRatePolicy         = "transcode_rate_policy"
+	TranscodePeakBitrate        = "transcode_peak_bitrate"
+	TranscodeBufferSize         = "transcode_buffer_size"
 	TranscodeOutputAudioCodec   = "transcode_output_audio_codec"   // 输出音频编码
 	TranscodeOutputAudioBitrate = "transcode_output_audio_bitrate" // 输出音频码率，例如 160k
 	TranscodeOutputResolution   = "transcode_output_resolution"    // 输出分辨率上限

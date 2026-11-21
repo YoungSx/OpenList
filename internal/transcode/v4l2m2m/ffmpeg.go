@@ -11,6 +11,7 @@ import (
 
 type ffmpegCodecs struct {
 	decode, encode map[string]bool
+	rateLimits     bool
 }
 
 var ffmpegCache struct {
@@ -28,6 +29,7 @@ func DetectForFFmpeg(executable string) Caps {
 	}
 	codecs := executableCodecs(executable)
 	usable := Caps{Decode: map[string]Size{}, Encode: map[string]Size{}}
+	usable.RateLimits = codecs.rateLimits
 	for _, decoder := range decoders {
 		if limit, ok := caps.Decode[decoder.fourcc]; ok && codecs.decode[decoder.name] {
 			usable.Decode[decoder.fourcc] = limit
@@ -69,6 +71,13 @@ func executableCodecs(executable string) ffmpegCodecs {
 		output.WriteByte('\n')
 	}
 	codecs := parseFFmpegCodecs(output.String())
+	if codecs.encode["h264_v4l2m2m"] {
+		out, err := exec.CommandContext(ctx, path, "-hide_banner", "-h", "encoder=h264_v4l2m2m").Output()
+		if err != nil {
+			return ffmpegCodecs{}
+		}
+		codecs.rateLimits = strings.Contains(string(out), "-v4l2_rate_limit ")
+	}
 	ffmpegCache.path, ffmpegCache.info, ffmpegCache.codecs = path, info, codecs
 	return codecs
 }

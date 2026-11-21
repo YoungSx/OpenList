@@ -91,8 +91,9 @@ type ChunkSession struct {
 	FFmpegPath string
 	Timeout    time.Duration
 
-	mu     sync.Mutex
-	chunks map[int]*Chunk // chunkIndex -> Chunk
+	mu      sync.Mutex
+	failure string
+	chunks  map[int]*Chunk // chunkIndex -> Chunk
 
 	// 给 LocalRunner 用：所有切片转完时关闭，让 runJob 能退出
 	allDoneCh   chan struct{}
@@ -296,6 +297,10 @@ func (cm *ChunkManager) findChunkBySeq(s *ChunkSession, seq int) int {
 // 同时受 MaxConcurrent 限制，超出时 LRU 淘汰最久未访问的 chunk
 func (cm *ChunkManager) ensureChunk(s *ChunkSession, idx int) {
 	s.mu.Lock()
+	if s.failure != "" {
+		s.mu.Unlock()
+		return
+	}
 	c, ok := s.chunks[idx]
 	if !ok {
 		s.mu.Unlock()
@@ -398,14 +403,16 @@ func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc,
 	// 真正的总 playlist 由 cache.BuildPlaylist 根据总时长生成。
 	chunkPlaylist := filepath.Join(s.OutDir, fmt.Sprintf("_chunk_%d.m3u8", idx))
 
-	args := buildFFmpegChunkArgs(s.Job, s.ProfDef, s.SegDur, c.StartTime, c.Duration, c.StartSeq, segPattern, chunkPlaylist, s.FFmpegPath)
+	args, err := buildFFmpegChunkArgs(s.Job, s.ProfDef, s.SegDur, c.StartTime, c.Duration, c.StartSeq, segPattern, chunkPlaylist, s.FFmpegPath)
 	stderr := &limitedBuffer{maxSize: 32 * 1024}
 
 	utils.Log.Infof("[transcode][chunk] start ffmpeg job=%s chunk=%d ss=%.1f t=%.1f startSeq=%d",
 		s.JobID, idx, c.StartTime, c.Duration, c.StartSeq)
 
 	startedAt := time.Now()
-	err := runProcess(ctx, s.FFmpegPath, args, stderr)
+	if err == nil {
+		err = runProcess(ctx, s.FFmpegPath, args, stderr)
+	}
 	elapsed := time.Since(startedAt)
 
 	s.mu.Lock()
@@ -415,13 +422,16 @@ func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc,
 		utils.Log.Infof("[transcode][chunk] chunk %d superseded (job=%s elapsed=%.1fs)", idx, s.JobID, elapsed.Seconds())
 		return
 	}
+	failed := false
 	switch {
 	case ctx.Err() != nil && c.State == ChunkKilled:
 		// 被 LRU/空闲/拖动主动 kill，状态保持 Killed
 		utils.Log.Infof("[transcode][chunk] chunk %d killed (job=%s elapsed=%.1fs)", idx, s.JobID, elapsed.Seconds())
 	case err != nil:
+		failed = true
 		c.State = ChunkFailed
 		c.Error = truncate(stderr.String(), 512)
+		s.failure = fmt.Sprintf("chunk %d failed: %v: %s", idx, err, c.Error)
 		utils.Log.Errorf("[transcode][chunk] chunk %d failed (job=%s elapsed=%.1fs): %v stderr=%s",
 			idx, s.JobID, elapsed.Seconds(), err, c.Error)
 	default:
@@ -430,6 +440,10 @@ func (cm *ChunkManager) runChunk(ctx context.Context, cancel context.CancelFunc,
 	}
 	c.chunkDoneClose()
 	s.mu.Unlock()
+	if failed {
+		cm.killAllChunks(s)
+		s.allDoneClose()
+	}
 
 	// 【关键修复】chunk 自然完成时，必须用 finalScan-style 扫描，否则边界切片（最大 seq）
 	// 永远不会被登记到 cache，导致下次播放/拖动到该位置时 60 秒超时
@@ -598,6 +612,15 @@ func (cm *ChunkManager) CancelAllForJob(jobID string) {
 
 // WaitDone 阻塞等待所有 chunk 完成（LocalRunner.runJob 用）
 func (s *ChunkSession) WaitDone() <-chan struct{} { return s.allDoneCh }
+
+func (s *ChunkSession) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failure != "" {
+		return fmt.Errorf("%s", s.failure)
+	}
+	return nil
+}
 
 // Stop 停止 ChunkManager（Manager.Stop 调用）
 func (cm *ChunkManager) Stop() {

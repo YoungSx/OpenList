@@ -17,6 +17,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
 	"github.com/OpenListTeam/OpenList/v4/internal/setting"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegargs"
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegpolicy"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/v4l2m2m"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 )
@@ -38,6 +39,7 @@ type limitedBuffer struct {
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
 	remain := b.maxSize - len(b.data)
 	if remain <= 0 {
 		return len(p), nil // 静默丢弃
@@ -46,7 +48,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		p = p[:remain]
 	}
 	b.data = append(b.data, p...)
-	return len(p), nil
+	return n, nil
 }
 
 func (b *limitedBuffer) String() string {
@@ -171,6 +173,12 @@ func (r *LocalRunner) runJob(job *Job) {
 		return
 	}
 	profile := job.Profiles[0]
+	job.mu.RLock()
+	prepared := job.EffectiveProfile != nil
+	if prepared {
+		profile = *job.EffectiveProfile
+	}
+	job.mu.RUnlock()
 	timeoutMin := setting.GetInt(conf.TranscodeJobTimeoutMin, 120)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMin)*time.Minute)
 	defer cancel()
@@ -192,6 +200,45 @@ func (r *LocalRunner) runJob(job *Job) {
 		return
 	}
 	outDir := jc.BaseDir
+	ffmpegPath := setting.GetStr(conf.TranscodeFFmpegPath, "ffmpeg")
+	var caps v4l2m2m.Caps
+	if hardwareSession(job, profile) {
+		caps = detectV4L2M2M(ffmpegPath)
+	}
+	if !prepared && profile.RatePolicy == "downscale" && hardwareSession(job, profile) {
+		if r.mgr.Chunks == nil {
+			_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFailed, Error: "rate probe requires a device scheduler"})
+			return
+		}
+		if !r.mgr.Chunks.acquireDevice(ctx) {
+			_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobCancelled, Error: "cancelled before rate probe"})
+			return
+		}
+	}
+	selected := profile
+	var policyErr error
+	if !prepared {
+		selected, policyErr = ffmpegpolicy.Prepare(ctx, job.SourceURL, job.Probe, profile, ffmpegPath, caps, runProcess)
+	}
+	if !prepared && profile.RatePolicy == "downscale" && hardwareSession(job, profile) {
+		r.mgr.Chunks.releaseDevice()
+	}
+	if policyErr != nil {
+		status := JobFailed
+		if ctx.Err() != nil {
+			status = JobCancelled
+		}
+		_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: status, Error: policyErr.Error()})
+		r.mgr.Cache.MarkFinal(job.ID, profile.Name)
+		return
+	}
+	job.mu.Lock()
+	job.EffectiveProfile = &selected
+	if selected.Scale != profile.Scale {
+		job.Warning = fmt.Sprintf("rate budget selected output scale %s before playback", selected.Scale)
+	}
+	job.mu.Unlock()
+	profile = selected
 
 	// 【智能调度】如果探测到了视频总时长，启用 chunk 模式（按需分段并发转码）
 	// 否则回退到旧的"一次性整段"模式（兼容 ffprobe 失败的场景）
@@ -223,6 +270,7 @@ func (r *LocalRunner) runJobByChunks(ctx context.Context, job *Job, profile Prof
 		close(stopWatcher)
 		watcherWG.Wait()
 		_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFailed, Error: err.Error()})
+		r.mgr.Cache.MarkFinal(job.ID, profile.Name)
 		return
 	}
 
@@ -238,6 +286,12 @@ func (r *LocalRunner) runJobByChunks(ctx context.Context, job *Job, profile Prof
 	close(stopWatcher)
 	watcherWG.Wait()
 	r.scanAndPublish(job, profile, outDir, true)
+	if sessionErr := session.Err(); sessionErr != nil {
+		r.mgr.Chunks.CancelSession(job.ID, profile.Name)
+		_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFailed, Error: sessionErr.Error()})
+		r.mgr.Cache.MarkFinal(job.ID, profile.Name)
+		return
+	}
 
 	if ctx.Err() != nil {
 		utils.Log.Infof("[transcode] job %s chunk session cancelled", job.ID)
@@ -269,7 +323,12 @@ func (r *LocalRunner) runJobLegacy(ctx context.Context, job *Job, profile Profil
 	segPattern := filepath.Join(outDir, "seg-%d.ts")
 
 	ffmpegPath := setting.GetStr(conf.TranscodeFFmpegPath, "ffmpeg")
-	args := buildFFmpegArgs(job, profile, segPattern, playlistPath, ffmpegPath)
+	args, err := buildFFmpegArgs(job, profile, segPattern, playlistPath, ffmpegPath)
+	if err != nil {
+		_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFailed, Error: err.Error()})
+		r.mgr.Cache.MarkFinal(job.ID, profile.Name)
+		return
+	}
 
 	stderr := &limitedBuffer{maxSize: 64 * 1024}
 
@@ -283,7 +342,7 @@ func (r *LocalRunner) runJobLegacy(ctx context.Context, job *Job, profile Profil
 		r.watchSegments(job, profile, outDir, stopWatcher)
 	}()
 
-	err := runProcess(ctx, ffmpegPath, args, stderr)
+	err = runProcess(ctx, ffmpegPath, args, stderr)
 	close(stopWatcher)
 	watcherWG.Wait()
 	r.scanAndPublish(job, profile, outDir, true)
@@ -303,6 +362,7 @@ func (r *LocalRunner) runJobLegacy(ctx context.Context, job *Job, profile Profil
 				Error:  fmt.Sprintf("ffmpeg failed: %v, stderr=%s", err, truncate(stderr.String(), 1024)),
 			})
 		}
+		r.mgr.Cache.MarkFinal(job.ID, profile.Name)
 		return
 	}
 	utils.Log.Infof("[transcode] job %s completed in %.1fs (legacy mode)", job.ID, time.Since(startedAt).Seconds())
@@ -530,7 +590,7 @@ func parseFFmpegPlaylistDurations(path string) map[int]float64 {
 
 // buildFFmpegArgs 构造 ffmpeg 命令行（一次性整段转码，兼容旧路径）
 // 当 Probe.Duration 不可用时，LocalRunner.runJob 会回退到这条路径。
-func buildFFmpegArgs(job *Job, profile Profile, segPattern, playlistPath, ffmpegPath string) []string {
+func buildFFmpegArgs(job *Job, profile Profile, segPattern, playlistPath, ffmpegPath string) ([]string, error) {
 	segDur := job.Output.SegmentDuration
 	// startTime=0, duration=0(=不限) 表示整段转码；startSeq=0
 	return buildFFmpegArgsCommon(job, profile, segDur, 0, 0, 0, segPattern, playlistPath, ffmpegPath)
@@ -539,12 +599,12 @@ func buildFFmpegArgs(job *Job, profile Profile, segPattern, playlistPath, ffmpeg
 // buildFFmpegChunkArgs 构造 chunk 模式的 ffmpeg 命令行
 // startTime: 起始时间（秒）；duration: 持续时长（秒，0=不限）；startSeq: 切片起始编号
 // chunk 模式与一次性整段共用底层参数构造，差异仅在 -ss/-t/-start_number。
-func buildFFmpegChunkArgs(job *Job, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath, ffmpegPath string) []string {
+func buildFFmpegChunkArgs(job *Job, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath, ffmpegPath string) ([]string, error) {
 	return buildFFmpegArgsCommon(job, profile, segDur, startTime, duration, startSeq, segPattern, playlistPath, ffmpegPath)
 }
 
 // buildFFmpegArgsCommon supplies local settings and capabilities to the shared builder.
-func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath, ffmpegPath string) []string {
+func buildFFmpegArgsCommon(job *Job, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath, ffmpegPath string) ([]string, error) {
 	var caps v4l2m2m.Caps
 	if strings.EqualFold(profile.HWAccel, string(HWV4L2M2M)) {
 		caps = detectV4L2M2M(ffmpegPath)

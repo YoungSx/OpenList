@@ -15,8 +15,11 @@ func value(args []string, name string) string {
 }
 
 func TestHLSCopyAudioUsesBrowserCompatibleEncoding(t *testing.T) {
-	args := Build("https://media/movie.mkv", SourceProbe{AudioCodec: "dts"},
+	args, err := Build("https://media/movie.mkv", SourceProbe{AudioCodec: "dts"},
 		Profile{VideoCodec: "h264", AudioCodec: "copy"}, 0, 0, 0, 0, "/tmp/seg-%d.ts", "/tmp/list.m3u8", v4l2m2m.Caps{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if value(args, "-c:a") != "aac" || value(args, "-ac") != "2" || value(args, "-ar") != "48000" {
 		t.Fatalf("DTS would be copied into browser HLS: %v", args)
 	}
@@ -28,8 +31,11 @@ func TestHLSCopyAudioUsesBrowserCompatibleEncoding(t *testing.T) {
 
 func TestHardwareSeekUsesCorrectOutputTimeline(t *testing.T) {
 	caps := v4l2m2m.Caps{Decode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}, Encode: map[string]v4l2m2m.Size{"H264": {Width: 1920, Height: 1080}}}
-	args := Build("/media/movie.mp4", SourceProbe{VideoCodec: "h264", AudioCodec: "aac", PixFmt: "yuv420p", Width: 1920, Height: 1080},
+	args, err := Build("/media/movie.mp4", SourceProbe{VideoCodec: "h264", AudioCodec: "aac", PixFmt: "yuv420p", Width: 1920, Height: 1080},
 		Profile{VideoCodec: "h264", HWAccel: "v4l2m2m"}, 2, 36, 12, 18, "/tmp/seg-%d.ts", "/tmp/list.m3u8", caps)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Contains(args, "-copyts") || value(args, "-t") != "12.000" || value(args, "-output_ts_offset") != "36.000" ||
 		value(args, "-vf") != "setpts=PTS-STARTPTS" || value(args, "-af") != "asetpts=PTS-STARTPTS" ||
 		slices.Contains(args, "-start_at_zero") || slices.Contains(args, "-to") {
@@ -54,9 +60,12 @@ func TestFrameRateAndGOPShareMediaClock(t *testing.T) {
 		{"0/0", "30/1", "60"},
 		{"-30/1", "30/1", "60"},
 	} {
-		args := Build("/media/movie.mp4", SourceProbe{FrameRate: tc.source},
+		args, err := Build("/media/movie.mp4", SourceProbe{FrameRate: tc.source},
 			Profile{VideoCodec: "h264", VideoBitrate: "4000k"}, 2, 0, 0, 0,
 			"/tmp/seg-%d.ts", "/tmp/list.m3u8", v4l2m2m.Caps{})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if value(args, "-r") != tc.output || value(args, "-fps_mode") != "cfr" || value(args, "-g") != tc.gop {
 			t.Fatalf("rate %s: %v", tc.source, args)
 		}

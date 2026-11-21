@@ -361,7 +361,11 @@ func TCPlaylist(c *gin.Context) {
 	// 配额/队列已满时不再起新的 ffmpeg，但 playlist 与已缓存的切片仍应可读：
 	// 这里只记下 quotaBlocked，交给切片请求在「缓存也没有」时才返回 429。
 	quotaBlocked := false
-	if st := job.GetStatus(); (st == transcode.JobCancelled || st == transcode.JobFinished || st == transcode.JobFailed) &&
+	if job.GetStatus() == transcode.JobFailed {
+		c.String(http.StatusInternalServerError, "transcode failed: "+job.GetError())
+		return
+	}
+	if st := job.GetStatus(); (st == transcode.JobCancelled || st == transcode.JobFinished) &&
 		mgr.Cache.SegmentCount(jobID, profile) == 0 {
 		if _, rerr := mgr.Scheduler.Reactivate(jobID); rerr == nil {
 			fmt.Printf("[transcode] reactivate job %s on playlist request (was %s)\n", jobID, st)
@@ -380,13 +384,13 @@ func TCPlaylist(c *gin.Context) {
 			return
 		}
 	}
-	if job.Status == transcode.JobFailed {
-		c.String(http.StatusInternalServerError, "transcode failed: "+job.Error)
+	if job.GetStatus() == transcode.JobFailed {
+		c.String(http.StatusInternalServerError, "transcode failed: "+job.GetError())
 		return
 	}
 	apiURL := common.GetApiUrlFromRequest(c.Request)
 	baseURL := fmt.Sprintf("%s/tc/%s/%s/%s/", apiURL, jobID, token, profile)
-	isFinished := job.Status == transcode.JobFinished
+	isFinished := job.GetStatus() == transcode.JobFinished
 	// 【关键】传入总时长，让 BuildPlaylist 能够生成完整切片列表（VOD 模式），
 	// 这样 HLS.js 就知道视频真实总时长，避免时长显示错误和拖动跳跃问题。
 	body := transcode.Default().Cache.BuildPlaylist(jobID, profile, job.Output.SegmentDuration,
@@ -433,9 +437,13 @@ func TCSegment(c *gin.Context) {
 	cache := mgr.Cache
 	info, err := cache.GetSegment(jobID, profile, seq)
 	if err != nil {
+		if job.GetStatus() == transcode.JobFailed {
+			c.String(http.StatusInternalServerError, "transcode failed: "+job.GetError())
+			return
+		}
 		// Cached immutable segments must not restart and overwrite their encoder output.
 		quotaBlocked := false
-		if st := job.GetStatus(); st == transcode.JobCancelled || st == transcode.JobFinished || st == transcode.JobFailed {
+		if st := job.GetStatus(); st == transcode.JobCancelled || st == transcode.JobFinished {
 			if _, rerr := mgr.Scheduler.Reactivate(jobID); rerr == nil {
 				fmt.Printf("[transcode] reactivate job %s on segment request (was %s)\n", jobID, st)
 			} else if errors.Is(rerr, transcode.ErrUserQuota) || errors.Is(rerr, transcode.ErrQueueFull) {
@@ -456,6 +464,10 @@ func TCSegment(c *gin.Context) {
 		info, err = cache.WaitForSegment(jobID, profile, seq, 60*time.Second)
 		if err != nil {
 			fmt.Printf("[tc-segment] req seq=%d FAILED after %.1fs: %v\n", seq, time.Since(waitStart).Seconds(), err)
+			if job.GetStatus() == transcode.JobFailed {
+				c.String(http.StatusInternalServerError, "transcode failed: "+job.GetError())
+				return
+			}
 			c.String(http.StatusNotFound, "segment not available: "+err.Error())
 			return
 		}
@@ -616,6 +628,9 @@ func WorkerJobFinish(c *gin.Context) {
 	if err := transcode.Default().Scheduler.Finish(&req); err != nil {
 		common.ErrorResp(c, err, 500)
 		return
+	}
+	for _, profile := range job.Profiles {
+		transcode.Default().Cache.MarkFinal(job.ID, profile.Name)
 	}
 	common.SuccessResp(c)
 }

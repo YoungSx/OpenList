@@ -79,6 +79,34 @@ func TestMeasuredSegmentsRejectInvalidDurations(t *testing.T) {
 	}
 }
 
+func TestMarkFinalWakesUnfulfilledSegmentRequests(t *testing.T) {
+	cache := NewCache(t.TempDir(), 1)
+	jc, err := cache.getOrCreate("job", "source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := cache.WaitForSegment("job", "source", 1, time.Minute)
+		result <- err
+	}()
+	waitFor(t, "segment waiter", func() bool {
+		jc.mu.RLock()
+		defer jc.mu.RUnlock()
+		return len(jc.waiters[1]) == 1
+	})
+	cache.MarkFinal("job", "source")
+	cache.MarkFinal("job", "source")
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("unproduced segment was reported as available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failed encode left the segment request waiting")
+	}
+}
+
 func TestUnreachableRateIsReportedWithoutFailingPlayback(t *testing.T) {
 	cache := NewCache(t.TempDir(), 1)
 	jc, err := cache.getOrCreate("job", "source")

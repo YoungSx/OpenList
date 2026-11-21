@@ -288,6 +288,16 @@ func (s *Scheduler) Finish(req *FinishRequest) error {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if req.EffectiveProfile != nil {
+		profile := *req.EffectiveProfile
+		if len(j.Profiles) == 0 || profile.Name != j.Profiles[0].Name {
+			return errors.New("effective profile does not match the job")
+		}
+		j.EffectiveProfile = &profile
+		if profile.Scale != j.Profiles[0].Scale {
+			j.Warning = "rate budget selected output scale " + profile.Scale + " before playback"
+		}
+	}
 	j.Status = req.Status
 	j.Error = req.Error
 	j.FinishedAt = time.Now()

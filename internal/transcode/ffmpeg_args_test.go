@@ -21,14 +21,19 @@ func withV4L2M2M(t *testing.T, caps v4l2m2m.Caps) {
 	t.Cleanup(func() { detectV4L2M2M = prev })
 }
 
-func chunkArgs(hw, codec, pixFmt string, height int, startTime float64) []string {
+func chunkArgs(t *testing.T, hw, codec, pixFmt string, height int, startTime float64) []string {
+	t.Helper()
 	job := &Job{
 		SourceURL: "http://127.0.0.1:5244/d/movie.mkv",
 		Probe:     SourceProbe{VideoCodec: codec, PixFmt: pixFmt, Width: height * 16 / 9, Height: height},
 	}
 	profile := Profile{Name: "1080p", VideoCodec: "h264", VideoBitrate: "4000k", Scale: "1920:-2",
 		AudioCodec: "aac", AudioBitrate: "160k", HWAccel: hw}
-	return buildFFmpegChunkArgs(job, profile, 6, startTime, 60, int(startTime)/6, "/tmp/seg-%d.ts", "/tmp/chunk.m3u8", "ffmpeg")
+	args, err := buildFFmpegChunkArgs(job, profile, 6, startTime, 60, int(startTime)/6, "/tmp/seg-%d.ts", "/tmp/chunk.m3u8", "ffmpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return args
 }
 
 // option 返回 name 后面的值，没有该选项时返回空串
@@ -46,7 +51,7 @@ func inputOption(args []string, name string) string {
 
 func TestV4L2M2MChunkArgs(t *testing.T) {
 	withV4L2M2M(t, s805)
-	args := chunkArgs("v4l2m2m", "hevc", "yuv420p", 1080, 120)
+	args := chunkArgs(t, "v4l2m2m", "hevc", "yuv420p", 1080, 120)
 
 	if got := inputOption(args, "-c:v"); got != "hevc_v4l2m2m" {
 		t.Errorf("decoder = %q, want hevc_v4l2m2m: %v", got, args)
@@ -81,7 +86,7 @@ func TestV4L2M2MChunkArgs(t *testing.T) {
 
 func TestV4L2M2MFirstChunkKeepsTimestamps(t *testing.T) {
 	withV4L2M2M(t, s805)
-	args := chunkArgs("v4l2m2m", "h264", "yuv420p", 1080, 0)
+	args := chunkArgs(t, "v4l2m2m", "h264", "yuv420p", 1080, 0)
 	if inputOption(args, "-c:v") != "h264_v4l2m2m" {
 		t.Fatalf("no hardware decoder: %v", args)
 	}
@@ -100,7 +105,7 @@ func TestV4L2M2MSoftwareDecodeFallback(t *testing.T) {
 		{"4K", "hevc", "yuv420p", 2160},
 		{"codec the device lacks", "av1", "yuv420p", 1080},
 	} {
-		args := chunkArgs("v4l2m2m", c.codec, c.pixFmt, c.height, 120)
+		args := chunkArgs(t, "v4l2m2m", c.codec, c.pixFmt, c.height, 120)
 		if dec := inputOption(args, "-c:v"); dec != "" {
 			t.Errorf("%s: decoder %q, want software decode", c.name, dec)
 		}
@@ -117,8 +122,8 @@ func TestV4L2M2MSoftwareDecodeFallback(t *testing.T) {
 
 func TestV4L2M2MWithoutDeviceMatchesCPU(t *testing.T) {
 	withV4L2M2M(t, v4l2m2m.Caps{})
-	got := chunkArgs("v4l2m2m", "hevc", "yuv420p", 1080, 120)
-	want := chunkArgs("none", "hevc", "yuv420p", 1080, 120)
+	got := chunkArgs(t, "v4l2m2m", "hevc", "yuv420p", 1080, 120)
+	want := chunkArgs(t, "none", "hevc", "yuv420p", 1080, 120)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("no device:\n got %v\nwant %v", got, want)
 	}
@@ -130,7 +135,7 @@ func TestOtherHWAccelSkipsV4L2Detection(t *testing.T) {
 	detectV4L2M2M = func(string) v4l2m2m.Caps { detected = true; return s805 }
 	t.Cleanup(func() { detectV4L2M2M = prev })
 
-	args := chunkArgs("none", "h264", "yuv420p", 1080, 120)
+	args := chunkArgs(t, "none", "h264", "yuv420p", 1080, 120)
 	if detected {
 		t.Error("devices probed for hwaccel=none")
 	}

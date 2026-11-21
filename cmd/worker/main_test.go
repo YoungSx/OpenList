@@ -18,7 +18,11 @@ func workerArgs(t *testing.T, caps v4l2m2m.Caps, hw, codec, pixFmt string) []str
 		Probe:     Probe{VideoCodec: codec, PixFmt: pixFmt, Width: 1920, Height: 1080},
 	}
 	profile := Profile{Name: "1080p", VideoCodec: "h264", VideoBitrate: "4000k", AudioCodec: "aac", HWAccel: hw}
-	return buildFFmpegArgs(job, profile, "/tmp/seg-%d.ts", "/tmp/playlist.m3u8")
+	args, err := buildFFmpegArgs(job, profile, "/tmp/seg-%d.ts", "/tmp/playlist.m3u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return args
 }
 
 func TestBuildFFmpegArgsV4L2M2M(t *testing.T) {

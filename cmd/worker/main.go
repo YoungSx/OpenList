@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegargs"
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegpolicy"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode/v4l2m2m"
 )
 
@@ -90,14 +91,15 @@ type OutputSpec struct {
 }
 type Probe = ffmpegargs.SourceProbe
 type Job struct {
-	ID            string     `json:"id"`
-	Path          string     `json:"path"`
-	SourceURL     string     `json:"source_url"`
-	Probe         Probe      `json:"probe"`
-	Profiles      []Profile  `json:"profiles"`
-	Output        OutputSpec `json:"output"`
-	CallbackToken string     `json:"callback_token"`
-	Deadline      int64      `json:"deadline"`
+	ID               string     `json:"id"`
+	Path             string     `json:"path"`
+	SourceURL        string     `json:"source_url"`
+	Probe            Probe      `json:"probe"`
+	Profiles         []Profile  `json:"profiles"`
+	Output           OutputSpec `json:"output"`
+	CallbackToken    string     `json:"callback_token"`
+	Deadline         int64      `json:"deadline"`
+	EffectiveProfile *Profile   `json:"effective_profile,omitempty"`
 }
 type ClaimResp struct {
 	Data struct {
@@ -106,10 +108,11 @@ type ClaimResp struct {
 }
 
 type FinishReq struct {
-	JobID  string `json:"job_id"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-	Stats  struct {
+	JobID            string   `json:"job_id"`
+	Status           string   `json:"status"`
+	Error            string   `json:"error,omitempty"`
+	EffectiveProfile *Profile `json:"effective_profile,omitempty"`
+	Stats            struct {
 		Elapsed  float64 `json:"elapsed"`
 		BytesOut int64   `json:"bytes_out"`
 	} `json:"stats"`
@@ -310,9 +313,39 @@ func (s *workerState) runJob(parent context.Context, job Job) {
 		return
 	}
 	profile := job.Profiles[0]
+	var caps v4l2m2m.Caps
+	if strings.EqualFold(profile.HWAccel, "v4l2m2m") {
+		caps = detectV4L2M2M()
+	}
+	selected := profile
+	var err error
+	if job.EffectiveProfile != nil {
+		selected = *job.EffectiveProfile
+	} else {
+		selected, err = ffmpegpolicy.Prepare(jobCtx, job.SourceURL, job.Probe, profile, *ffmpeg, caps,
+			func(ctx context.Context, executable string, args []string, output io.Writer) error {
+				command := exec.CommandContext(ctx, executable, args...)
+				command.Stderr = output
+				return command.Run()
+			})
+	}
+	if err != nil {
+		status := "failed"
+		if jobCtx.Err() != nil {
+			status = "cancelled"
+		}
+		s.finish(job, status, err.Error(), 0, 0)
+		return
+	}
+	profile = selected
+	job.EffectiveProfile = &selected
 	playlist := filepath.Join(tmpDir, "playlist.m3u8")
 	segPattern := filepath.Join(tmpDir, "seg-%d.ts")
-	args := buildFFmpegArgs(job, profile, segPattern, playlist)
+	args, err := buildFFmpegArgs(job, profile, segPattern, playlist)
+	if err != nil {
+		s.finish(job, "failed", err.Error(), 0, 0)
+		return
+	}
 
 	cmd := exec.CommandContext(jobCtx, *ffmpeg, args...)
 	stderr := &bytes.Buffer{}
@@ -331,7 +364,7 @@ func (s *workerState) runJob(parent context.Context, job Job) {
 		s.watchAndUpload(jobCtx, job, profile.Name, tmpDir, stopUpload)
 	}()
 
-	err := cmd.Wait()
+	err = cmd.Wait()
 	close(stopUpload)
 	<-uploadDone
 	// 最后一次扫描：把还未上传的尾片传上去
@@ -351,6 +384,7 @@ func (s *workerState) runJob(parent context.Context, job Job) {
 func (s *workerState) finish(job Job, status, errStr string, elapsed float64, bytesOut int64) {
 	req := FinishReq{
 		JobID: job.ID, Status: status, Error: errStr,
+		EffectiveProfile: job.EffectiveProfile,
 	}
 	req.Stats.Elapsed = elapsed
 	req.Stats.BytesOut = bytesOut
@@ -473,7 +507,7 @@ func (s *workerState) uploadSegment(job Job, profile string, seq int, dur float6
 // detectV4L2M2M 可在测试中替换，避免依赖本机设备
 var detectV4L2M2M = func() v4l2m2m.Caps { return v4l2m2m.DetectForFFmpeg(*ffmpeg) }
 
-func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) []string {
+func buildFFmpegArgs(job Job, profile Profile, segPattern, playlist string) ([]string, error) {
 	var caps v4l2m2m.Caps
 	if strings.EqualFold(profile.HWAccel, "v4l2m2m") {
 		caps = detectV4L2M2M()

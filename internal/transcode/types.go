@@ -79,14 +79,15 @@ type Job struct {
 	OwnerID string `json:"-"`
 
 	// 运行时
-	Status       JobStatus `json:"status"`
-	WorkerID     string    `json:"worker_id"`
-	CreatedAt    time.Time `json:"created_at"`
-	StartedAt    time.Time `json:"started_at"`
-	FinishedAt   time.Time `json:"finished_at"`
-	LastAccessAt time.Time `json:"last_access_at"` // 播放端最后一次请求 segment/playlist 的时间
-	Error        string    `json:"error,omitempty"`
-	Warning      string    `json:"warning,omitempty"`
+	Status           JobStatus `json:"status"`
+	WorkerID         string    `json:"worker_id"`
+	CreatedAt        time.Time `json:"created_at"`
+	StartedAt        time.Time `json:"started_at"`
+	FinishedAt       time.Time `json:"finished_at"`
+	LastAccessAt     time.Time `json:"last_access_at"` // 播放端最后一次请求 segment/playlist 的时间
+	Error            string    `json:"error,omitempty"`
+	Warning          string    `json:"warning,omitempty"`
+	EffectiveProfile *Profile  `json:"effective_profile,omitempty"`
 
 	// 内部：用于"边转边播"——首切片就绪后关闭该 channel
 	readyOnce sync.Once
@@ -132,6 +133,12 @@ func (j *Job) GetStatus() JobStatus {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	return j.Status
+}
+
+func (j *Job) GetError() string {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	return j.Error
 }
 
 // MarkReady 标记任务已可播放（首切片就绪）

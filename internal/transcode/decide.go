@@ -119,6 +119,9 @@ func BuildProfile() Profile {
 		AudioCodec:   setting.GetStr(conf.TranscodeOutputAudioCodec),
 		AudioBitrate: setting.GetStr(conf.TranscodeOutputAudioBitrate),
 		HWAccel:      setting.GetStr(conf.TranscodeHWAccel),
+		RatePolicy:   setting.GetStr(conf.TranscodeRatePolicy, "warn"),
+		PeakBitrate:  setting.GetStr(conf.TranscodePeakBitrate),
+		BufferSize:   setting.GetStr(conf.TranscodeBufferSize),
 	}
 }
 

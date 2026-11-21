@@ -22,8 +22,9 @@ type Size struct {
 
 // Caps 本机 V4L2 M2M 设备支持的压缩格式，键为 V4L2 FourCC，例如 "H264"
 type Caps struct {
-	Decode map[string]Size // 解码设备 OUTPUT 队列接受的格式
-	Encode map[string]Size // 编码设备 CAPTURE 队列产出的格式
+	Decode     map[string]Size // 解码设备 OUTPUT 队列接受的格式
+	Encode     map[string]Size // 编码设备 CAPTURE 队列产出的格式
+	RateLimits bool            // configured FFmpeg requires peak/CPB controls
 }
 
 // decoders ffprobe 的 codec_name → V4L2 FourCC 与 FFmpeg 解码器

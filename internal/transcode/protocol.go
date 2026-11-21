@@ -54,17 +54,18 @@ type ClaimResponse struct {
 // ---- 完成 ----
 
 type FinishRequest struct {
-	JobID  string    `json:"job_id"`
-	Status JobStatus `json:"status"`
-	Error  string    `json:"error,omitempty"`
-	Stats  JobStats  `json:"stats"`
+	JobID            string    `json:"job_id"`
+	Status           JobStatus `json:"status"`
+	Error            string    `json:"error,omitempty"`
+	Stats            JobStats  `json:"stats"`
+	EffectiveProfile *Profile  `json:"effective_profile,omitempty"`
 }
 
 type JobStats struct {
-	Elapsed   float64 `json:"elapsed"`
-	FPS       float64 `json:"fps"`
-	Speed     float64 `json:"speed"`
-	BytesOut  int64   `json:"bytes_out"`
+	Elapsed  float64 `json:"elapsed"`
+	FPS      float64 `json:"fps"`
+	Speed    float64 `json:"speed"`
+	BytesOut int64   `json:"bytes_out"`
 }
 
 // ---- 通用响应 ----

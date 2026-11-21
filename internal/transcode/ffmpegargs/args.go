@@ -26,17 +26,24 @@ type SourceProbe struct {
 
 // Profile 输出转码档位
 type Profile struct {
-	Name         string `json:"name"`          // 例如 1080p
-	VideoCodec   string `json:"video_codec"`   // h264 / hevc / av1
-	VideoBitrate string `json:"video_bitrate"` // 例如 4000k
-	Scale        string `json:"scale"`         // 例如 1920:-2
-	AudioCodec   string `json:"audio_codec"`   // aac / mp3 / opus / copy
-	AudioBitrate string `json:"audio_bitrate"` // 例如 160k
-	HWAccel      string `json:"hwaccel"`       // worker 端如何选择硬件加速
+	Name         string `json:"name"`                  // 例如 1080p
+	VideoCodec   string `json:"video_codec"`           // h264 / hevc / av1
+	VideoBitrate string `json:"video_bitrate"`         // 例如 4000k
+	Scale        string `json:"scale"`                 // 例如 1920:-2
+	AudioCodec   string `json:"audio_codec"`           // aac / mp3 / opus / copy
+	AudioBitrate string `json:"audio_bitrate"`         // 例如 160k
+	HWAccel      string `json:"hwaccel"`               // worker 端如何选择硬件加速
+	RatePolicy   string `json:"rate_policy,omitempty"` // warn / fail / downscale
+	PeakBitrate  string `json:"peak_bitrate,omitempty"`
+	BufferSize   string `json:"buffer_size,omitempty"` // bits, like FFmpeg -bufsize
 }
 
 // Build constructs one HLS process without reading settings or probing devices.
-func Build(source string, probe SourceProbe, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath string, v4l2 v4l2m2m.Caps) []string {
+func Build(source string, probe SourceProbe, profile Profile, segDur int, startTime, duration float64, startSeq int, segPattern, playlistPath string, v4l2 v4l2m2m.Caps) ([]string, error) {
+	peak, buffer, err := RateLimits(profile)
+	if err != nil {
+		return nil, err
+	}
 	hw := strings.ToLower(profile.HWAccel)
 	args := []string{"-y", "-loglevel", "warning"}
 
@@ -94,6 +101,10 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	if enc := v4l2.Encoder(profile.VideoCodec, probe.Width, probe.Height, profile.Scale); enc != "" {
 		vcodec = enc
 	}
+	if peak > 0 && strings.HasSuffix(vcodec, "_v4l2m2m") &&
+		(vcodec != "h264_v4l2m2m" || !v4l2.RateLimits) {
+		return nil, fmt.Errorf("required V4L2 peak/CPB mapping is unavailable; use a compatible FFmpeg/driver or software encoder")
+	}
 	args = append(args, "-c:v", vcodec)
 	switch {
 	case strings.HasSuffix(vcodec, "_v4l2m2m"):
@@ -107,9 +118,16 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 	if profile.VideoBitrate != "" {
 		args = append(args, "-b:v", profile.VideoBitrate)
 		// Upstream V4L2 wrappers do not forward peak/CPB constraints to drivers.
-		if !strings.HasSuffix(vcodec, "_v4l2m2m") {
+		if !strings.HasSuffix(vcodec, "_v4l2m2m") && (profile.RatePolicy == "" || profile.RatePolicy == "warn") {
 			args = append(args, "-maxrate", profile.VideoBitrate, "-bufsize", profile.VideoBitrate)
 		}
+	}
+	if peak > 0 {
+		if strings.HasSuffix(vcodec, "_v4l2m2m") {
+			args = append(args, "-v4l2_rate_limit", "1")
+		}
+		args = append(args, "-maxrate", strconv.FormatInt(peak, 10),
+			"-bufsize", strconv.FormatInt(buffer, 10))
 	}
 	videoFilter := ""
 	if profile.Scale != "" {
@@ -193,7 +211,7 @@ func Build(source string, probe SourceProbe, profile Profile, segDur int, startT
 		args = append(args, "-start_number", strconv.Itoa(startSeq))
 	}
 	args = append(args, playlistPath)
-	return args
+	return args, nil
 }
 
 func outputFrameRate(rate string) (float64, string) {

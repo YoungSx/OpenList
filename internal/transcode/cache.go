@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/OpenListTeam/OpenList/v4/internal/transcode/ffmpegargs"
 )
 
 // SegmentInfo 单个切片元数据
@@ -276,6 +278,23 @@ func (c *Cache) WaitForSegment(jobID, profile string, seq int, timeout time.Dura
 	}
 }
 
+// MarkFinal wakes requests that cannot be fulfilled after completion or failure.
+func (c *Cache) MarkFinal(jobID, profile string) {
+	jc, err := c.getOrCreate(jobID, profile)
+	if err != nil {
+		return
+	}
+	jc.mu.Lock()
+	jc.final = true
+	for seq, waiters := range jc.waiters {
+		for _, waiter := range waiters {
+			close(waiter)
+		}
+		delete(jc.waiters, seq)
+	}
+	jc.mu.Unlock()
+}
+
 // SegmentCount 返回 (jobID, profile) 当前已生成的切片数量。
 // 用于 TCPlaylist 在首次返回前等待至少若干切片就绪，避免 playlist
 // 中只有 seg-0 导致 HLS.js 反复请求填充缓冲。
@@ -442,23 +461,7 @@ func buildCodecString(p Profile) string {
 }
 
 func parseBitrate(s string) (int64, error) {
-	s = strings.TrimSpace(strings.ToLower(s))
-	if s == "" {
-		return 0, nil
-	}
-	mult := int64(1)
-	if strings.HasSuffix(s, "k") {
-		mult = 1000
-		s = strings.TrimSuffix(s, "k")
-	} else if strings.HasSuffix(s, "m") {
-		mult = 1_000_000
-		s = strings.TrimSuffix(s, "m")
-	}
-	v, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return v * mult, nil
+	return ffmpegargs.ParseBitrate(s)
 }
 
 // Cleanup 删除某个 job 的所有切片，并关闭所有阻塞的 waiter goroutine

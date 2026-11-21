@@ -118,6 +118,105 @@ func TestChunkSessionIncludesSubsecondTail(t *testing.T) {
 	}
 }
 
+func TestFailedChunkEndsSessionWithoutAnotherLaunch(t *testing.T) {
+	for _, timeout := range []bool{false, true} {
+		t.Run(fmt.Sprintf("timeout=%t", timeout), func(t *testing.T) {
+			s := testSession(t, 2)
+			if timeout {
+				s.Timeout = 10 * time.Millisecond
+			}
+			cm := NewChunkManager(nil)
+			launches := 0
+			previous := runProcess
+			runProcess = func(ctx context.Context, _ string, _ []string, _ io.Writer) error {
+				launches++
+				if timeout {
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				return fmt.Errorf("rate budget exceeded")
+			}
+			t.Cleanup(func() { runProcess = previous })
+			cm.ensureChunk(s, 0)
+			select {
+			case <-s.WaitDone():
+			case <-time.After(time.Second):
+				t.Fatal("failed chunk left the session waiting")
+			}
+			if s.Err() == nil || chunkState(s, 0) != ChunkFailed {
+				t.Fatal("session did not preserve its failure")
+			}
+			cm.ensureChunk(s, 1)
+			if launches != 1 {
+				t.Fatalf("failed session launched another encoder: %d", launches)
+			}
+		})
+	}
+}
+
+func TestResumedJobKeepsSelectedProfile(t *testing.T) {
+	for key, value := range map[string]string{conf.TranscodeFFmpegPath: "ffmpeg", conf.TranscodeJobTimeoutMin: "1"} {
+		op.Cache.SetSetting(key, &model.SettingItem{Key: key, Value: value})
+	}
+	t.Cleanup(op.Cache.ClearAll)
+	caps := s805
+	caps.RateLimits = true
+	withV4L2M2M(t, caps)
+	manager := &Manager{Scheduler: NewScheduler(NewWorkerRegistry()), Cache: NewCache(t.TempDir(), 1)}
+	manager.Chunks = NewChunkManager(manager)
+	runner := NewLocalRunner(manager)
+	job := NewJob()
+	job.SourceURL = "/media/movie.mp4"
+	job.Probe = SourceProbe{Width: 1920, Height: 1080}
+	requested := Profile{Name: "source", VideoCodec: "h264", VideoBitrate: "1000k", HWAccel: "v4l2m2m", RatePolicy: "downscale", Scale: "1920:-2"}
+	selected := requested
+	selected.Scale = "640:-2"
+	job.Profiles = []Profile{requested}
+	job.EffectiveProfile = &selected
+	job = manager.Scheduler.Submit(job)
+	previous := runProcess
+	calls := 0
+	runProcess = func(_ context.Context, _ string, args []string, _ io.Writer) error {
+		calls++
+		if option(args, "-vf") != "scale=640:-2" || filepath.Base(args[len(args)-1]) != "playlist.m3u8" {
+			t.Fatalf("resume probed again or changed output size: %v", args)
+		}
+		return nil
+	}
+	t.Cleanup(func() { runProcess = previous })
+	runner.runJob(job)
+	if _, err := manager.Scheduler.Reactivate(job.ID); err != nil {
+		t.Fatal(err)
+	}
+	runner.runJob(job)
+	if calls != 2 || job.Profiles[0] != requested || *job.EffectiveProfile != selected {
+		t.Fatalf("selected profile changed across resume: calls=%d job=%+v", calls, job)
+	}
+}
+
+func TestWorkerFinishKeepsEffectiveProfileOnReactivation(t *testing.T) {
+	scheduler := NewScheduler(NewWorkerRegistry())
+	job := NewJob()
+	requested := Profile{Name: "source", Scale: "1920:-2"}
+	selected := requested
+	selected.Scale = "640:-2"
+	job.Profiles = []Profile{requested}
+	job = scheduler.Submit(job)
+	if err := scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobCancelled, EffectiveProfile: &selected}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler.Reactivate(job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if *job.EffectiveProfile != selected || job.Profiles[0] != requested {
+		t.Fatal("worker selection was lost or replaced the requested profile")
+	}
+	selected.Name = "another-profile"
+	if err := scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFinished, EffectiveProfile: &selected}); err == nil || job.GetStatus() != JobPending {
+		t.Fatal("worker changed the job's profile identity")
+	}
+}
+
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
