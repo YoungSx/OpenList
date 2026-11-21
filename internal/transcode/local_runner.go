@@ -285,13 +285,13 @@ func (r *LocalRunner) runJobByChunks(ctx context.Context, job *Job, profile Prof
 
 	close(stopWatcher)
 	watcherWG.Wait()
-	r.scanAndPublish(job, profile, outDir, true)
 	if sessionErr := session.Err(); sessionErr != nil {
 		r.mgr.Chunks.CancelSession(job.ID, profile.Name)
 		_ = r.mgr.Scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFailed, Error: sessionErr.Error()})
 		r.mgr.Cache.MarkFinal(job.ID, profile.Name)
 		return
 	}
+	r.scanAndPublish(job, profile, outDir, true)
 
 	if ctx.Err() != nil {
 		utils.Log.Infof("[transcode] job %s chunk session cancelled", job.ID)
@@ -345,7 +345,9 @@ func (r *LocalRunner) runJobLegacy(ctx context.Context, job *Job, profile Profil
 	err = runProcess(ctx, ffmpegPath, args, stderr)
 	close(stopWatcher)
 	watcherWG.Wait()
-	r.scanAndPublish(job, profile, outDir, true)
+	if err == nil || ctx.Err() != nil {
+		r.scanAndPublish(job, profile, outDir, true)
+	}
 
 	if err != nil {
 		if ctx.Err() != nil {

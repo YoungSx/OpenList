@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -214,6 +215,57 @@ func TestWorkerFinishKeepsEffectiveProfileOnReactivation(t *testing.T) {
 	selected.Name = "another-profile"
 	if err := scheduler.Finish(&FinishRequest{JobID: job.ID, Status: JobFinished, EffectiveProfile: &selected}); err == nil || job.GetStatus() != JobPending {
 		t.Fatal("worker changed the job's profile identity")
+	}
+}
+
+func TestFailedEncodeDoesNotPublishItsTail(t *testing.T) {
+	for _, chunks := range []bool{false, true} {
+		t.Run(fmt.Sprintf("chunks=%t", chunks), func(t *testing.T) {
+			for key, value := range map[string]string{conf.TranscodeFFmpegPath: "ffmpeg", conf.TranscodeSegmentDuration: "2",
+				conf.TranscodeChunkDurationSec: "12", conf.TranscodeChunkPrefetch: "false", conf.TranscodeJobTimeoutMin: "1",
+				conf.TranscodeMaxChunkConcurrency: "1", conf.TranscodeChunkIdleSec: "60"} {
+				op.Cache.SetSetting(key, &model.SettingItem{Key: key, Value: value})
+			}
+			t.Cleanup(op.Cache.ClearAll)
+			manager := &Manager{Scheduler: NewScheduler(NewWorkerRegistry()), Cache: NewCache(t.TempDir(), 1)}
+			manager.Chunks = NewChunkManager(manager)
+			runner := NewLocalRunner(manager)
+			manager.localRunner = runner
+			job := manager.Scheduler.Submit(NewJob())
+			job.Probe.Duration = 4
+			job.Output.SegmentDuration = 2
+			profile := Profile{Name: "source", VideoCodec: "h264"}
+			if _, err := manager.Cache.PutSegment(job.ID, profile.Name, 0, 2, strings.NewReader("completed segment"), false); err != nil {
+				t.Fatal(err)
+			}
+			jc, _ := manager.Cache.getOrCreate(job.ID, profile.Name)
+			previous := runProcess
+			runProcess = func(_ context.Context, _ string, args []string, _ io.Writer) error {
+				playlist := args[len(args)-1]
+				if err := os.WriteFile(filepath.Join(filepath.Dir(playlist), "seg-1.ts"), []byte("audio-only tail after video failure"), 0o600); err != nil {
+					return err
+				}
+				if err := os.WriteFile(playlist, []byte("#EXTINF:0.5,\nseg-1.ts\n#EXT-X-ENDLIST\n"), 0o600); err != nil {
+					return err
+				}
+				return fmt.Errorf("video rate budget exceeded")
+			}
+			t.Cleanup(func() { runProcess = previous })
+			if chunks {
+				runner.runJobByChunks(context.Background(), job, profile, jc.BaseDir)
+			} else {
+				runner.runJobLegacy(context.Background(), job, profile, jc.BaseDir)
+			}
+			if job.GetStatus() != JobFailed {
+				t.Fatal("failed video encode completed the job")
+			}
+			if _, err := manager.Cache.GetSegment(job.ID, profile.Name, 0); err != nil {
+				t.Fatal("failure discarded a completed cached segment")
+			}
+			if _, err := manager.Cache.GetSegment(job.ID, profile.Name, 1); err == nil {
+				t.Fatal("failed encoder published its uncommitted tail")
+			}
+		})
 	}
 }
 

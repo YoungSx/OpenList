@@ -368,7 +368,9 @@ func (s *workerState) runJob(parent context.Context, job Job) {
 	close(stopUpload)
 	<-uploadDone
 	// 最后一次扫描：把还未上传的尾片传上去
-	s.uploadOnce(job, profile.Name, tmpDir, true)
+	if err == nil || jobCtx.Err() != nil {
+		s.uploadOnce(job, profile.Name, tmpDir, true)
+	}
 
 	if err != nil {
 		if jobCtx.Err() == context.Canceled {
