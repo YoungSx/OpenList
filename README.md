@@ -25,7 +25,10 @@
 This branch adds generic stateful V4L2 transcoding, tested on the OneCloud S805.
 Select `v4l2m2m` and map the codec devices into the container. Source frame rates
 drive CFR/GOP timing, and HLS bandwidth follows measured segment bytes and durations.
-Video bitrate is a target; devices can exceed it. See the
+Video bitrate is a target; devices can exceed it. The default `warn` policy
+keeps playback running. Opt-in `fail` requires compatible peak/buffer controls;
+`downscale` probes before publishing and keeps the selected size for the job.
+See the
 [setup and rate semantics](internal/transcode/v4l2m2m/README.md) and
 [hardware validation](internal/transcode/v4l2m2m/VALIDATION.md).
 

@@ -59,10 +59,11 @@ audio filters then rebase the chunk before CFR encoding, its duration is bounded
 relative to that start, and the muxer restores the seek offset. This keeps later
 chunks on the same playback timeline as the first chunk.
 
-`VideoBitrate` is a target for the device's rate controller. The V4L2 wrapper
-receives `-b:v`; it does not receive `-maxrate`/`-bufsize`, which upstream FFmpeg
-does not map to V4L2 peak/CPB controls. Other encoder backends keep their existing
-arguments. This integration does not provide a strict network bandwidth cap.
+`VideoBitrate` is a target for the device's rate controller. The default
+`transcode_rate_policy=warn` sends `-b:v` to V4L2; upstream FFmpeg does not map
+`-maxrate`/`-bufsize` to its peak/CPB controls. Other encoder backends keep their
+existing arguments. This integration does not provide a strict network
+bandwidth cap.
 After the first segment is ready, the master playlist advertises the greater
 of the requested video-plus-audio rate and the highest measured segment rate.
 `AVERAGE-BANDWIDTH` uses total segment bytes divided by their total media
@@ -74,8 +75,54 @@ For local V4L2 jobs, an observed average above 125% of the requested
 video-plus-audio rate after at least three segments produces a `warning` in
 `GET /api/admin/transcode/jobs` and one log message. Playback continues. Select
 a smaller output resolution or software encoding when the connection cannot
-carry the measured rate. Automatic downscaling, live rate guarantees and retrying
-a partially encoded chunk with another encoder are not implemented.
+carry the measured rate.
+
+The opt-in policies use the existing profile, worker and chunk paths:
+
+| Setting | Behavior |
+| --- | --- |
+| `transcode_rate_policy=warn` | Default target tracking and overshoot warning; playback continues. |
+| `transcode_rate_policy=fail` | Require the video peak/buffer envelope and report an encode failure when the driver rejects output. |
+| `transcode_rate_policy=downscale` | Probe isolated HLS output before publication, then keep one selected size for the job. |
+| `transcode_peak_bitrate` | Video bits per second; blank uses the requested target. |
+| `transcode_buffer_size` | Video buffer in **bits**, like FFmpeg `-bufsize`; blank allows two seconds of peak rate. |
+
+Peak must be at least the positive target, and buffer must hold at least 8192
+bits. For V4L2 H.264, `fail` and `downscale` require the configured FFmpeg to
+expose `-v4l2_rate_limit`. The builder passes that option, maxrate and bufsize;
+the wrapper transactionally sets BITRATE, BITRATE_PEAK and H264_CPB_SIZE and
+fails if the device rejects them. The independent
+[FFmpeg patch](https://github.com/YoungSx/onecloud-meson8b-vcodec/blob/main/patches/ffmpeg-7.0.2-v4l2-rate-limits.patch)
+is for 7.0.2 after its drain patch. Other V4L2 encoder formats do not have this
+mapping. Validation errors never produce an unconstrained command.
+
+The Meson8b driver uses KiB (1024 bytes) for H264_CPB_SIZE. Buffer bits are
+rounded down by division by 8192, so the effective capacity does not exceed
+the request: `2M` bits becomes 244 KiB (249856 bytes). New sessions start with
+full credits, then refill on the negotiated media clock. Oversized access units
+fail before publication. This is a VBR envelope with allowed bursts, not
+strict CBR, HRD, a per-segment limit or an audio/TS/network cap.
+
+Downscale probes up to six media seconds (less for a short source), with each
+attempt limited to 90 wall seconds. It tries the requested size, then smaller
+aspect-preserving widths among 1280/854/640/426/320. It requires known geometry,
+complete output and a measured HLS average within 125% of video plus audio
+target, allowing muxing overhead. Probe files are private temporary output and
+are removed on success, failure or cancellation. A selected profile preserves
+its name/cache URLs; `effective_profile` reports the chosen size locally and
+in the standalone worker's finish callback. Chunks and reactivated jobs reuse
+it. A later complex scene can still exceed the budget and fail; the sample
+does not predict future peaks. Failed jobs return errors for missing segments
+and playlists without automatic reactivation; completed cached segments remain
+readable. A partially encoded chunk is not retried with another encoder.
+
+The candidate image keeps stock FFmpeg and adds the independent test tool at
+`/opt/openlist/ffmpeg-v4l2`. To use these V4L2 limits, explicitly configure
+`transcode_ffmpeg_path` to that path (or provide a compatible full FFmpeg),
+plus the corresponding driver. The tool supports files/HTTP, H.264/HEVC/AAC
+and HLS/MPEG-TS. It lacks HTTPS/TLS, libx264/libx265 and full format coverage;
+it is not a general replacement for stock FFmpeg. The standalone worker uses
+the same choice through `-ffmpeg`.
 
 The play endpoint first filters size/extension, then checks source codec and
 bitrate again after ffprobe before submitting a job. An unknown probe field
