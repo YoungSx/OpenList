@@ -30,25 +30,35 @@ Frontend `a845b34` passes full lint/type-check, 72 tests, production build and
 This includes preparation/status handling and HLS instance replacement cleanup.
 The earlier Monaco/archive/storage type errors have been fixed.
 
-Prepared image
-`youngsx/openlist-onecloud:v4.2.10-official-ffmpeg-a845b34-clean` contains backend
-`6c77764f` and frontend `a845b34`, with old generated frontend assets removed.
-Its FFmpeg/ffprobe match the pinned official base byte-for-byte. The image
-without the `-clean` suffix is superseded. The clean image has not replaced
-production and has no new browser/hardware acceptance.
+Image `youngsx/openlist-onecloud:v4.2.10-official-ffmpeg-a845b34-clean`
+contains backend code `6c77764f` and frontend `a845b34`,with residual generated
+assets removed. FFmpeg/ffprobe match the pinned official base byte-for-byte.
+It now runs on production with the explicitly authorized development driver
+source `1a1d1f7`; original v0.4.0 codec installation is retained for rollback.
+The superseded image without the `-clean` suffix is not used for acceptance.
 
-[Browser observations](https://github.com/YoungSx/onecloud-meson8b-vcodec/blob/e82a3334681b686424fcc8e5eef411d2586d683f/evidence/p0-p3-2026-11-22/browser-observed.json)
-apply to the earlier image: bounded playback, forward/backward seeks and
-cancellation, with buffering observed. They do not establish realtime playback.
-The driver candidate required two local device recoveries during later tests;
-original modules/services are restored and sustained production load tests are
-paused. See the separate
-[driver stability record](https://github.com/YoungSx/onecloud-meson8b-vcodec/blob/e82a3334681b686424fcc8e5eef411d2586d683f/docs/next-development-status.md).
+The clean image passed bounded actual browser HLS playback,uncached forward
+and backward seeks,end seek and cancellation in disposable data. No MediaError
+occurred; exact cached seek events hit12 and50 seconds,and device release took
+0.242s with poolzero. Buffering occurred,so this is not a realtime guarantee.
+See the separate
+[dated driver/application evidence](https://github.com/YoungSx/onecloud-meson8b-vcodec/tree/main/evidence/development-2026-11-22).
 
-中文：最新版前端已通过完整 lint、72 项测试、构建和 CI。干净镜像保持官方
-FFmpeg，尚未替换生产版本，最新版浏览器/硬件验收仍待完成。此前播放有
-缓冲，不能作为实时性能保证；驱动验证期间两次离线后原服务已恢复，生产
-持续负载测试暂停。
+The new driver includes contiguous NV12,IRQ/EOS completion ordering,async
+conversion,SPS/VUI and firmware DMA guards. Normal and fractional-rate MP4
+count,duration,color-tag/crop and independent decode checks pass with stock
+FFmpeg. Unknown color metadata is not invented; stock `h264_metadata` can
+supply explicit output tags after an actual colorspace conversion.
+
+Prior device outages remain unexplained. Sustained production load tests are
+paused; bounded playback and CI do not establish long-term stability. Legacy
+codec tails and the1.3× realtime target remain open. Source and tests remain
+compatible with official FFmpeg without private control extensions.
+
+中文：新版干净 OpenList 镜像已运行，新驱动按授权部署，原安装保留可回滚。
+最新前端通过有界实际浏览器播放、前后跳转、取消与设备释放；仍有缓冲，
+不宣称实时保证。码流元数据与分数帧率检查通过，FFmpeg 保持原版；历史
+整机离线原因、旧格式尾帧和长期稳定性仍是未完成项。
 
 The old private-extension rate-budget image is superseded. Dated historical
 results remain available but must not be used as official compatibility proof.
