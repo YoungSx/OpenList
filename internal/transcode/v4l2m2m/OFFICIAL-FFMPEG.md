@@ -25,10 +25,30 @@ No maxrate/bufsize/private-option hardware guarantee is claimed.
 的限制明确失败。测试结束恢复原编码模块，生产容器启动时间不变，四项
 HTTP 探针 200、Arcane 运行、解码帧池归零。
 
-Frontend unit tests and its production build cover preparation timeout and
-status handling. Browser rendering is a separate acceptance. Current full
-frontend type-check still reports pre-existing Monaco/archive/storage errors;
-the touched player files no longer report errors.
+Frontend `a845b34` passes full lint/type-check, 72 tests, production build and
+[fork CI](https://github.com/YoungSx/OpenList-Frontend/actions/runs/44992424901).
+This includes preparation/status handling and HLS instance replacement cleanup.
+The earlier Monaco/archive/storage type errors have been fixed.
+
+Prepared image
+`youngsx/openlist-onecloud:v4.2.10-official-ffmpeg-a845b34-clean` contains backend
+`6c77764f` and frontend `a845b34`, with old generated frontend assets removed.
+Its FFmpeg/ffprobe match the pinned official base byte-for-byte. The image
+without the `-clean` suffix is superseded. The clean image has not replaced
+production and has no new browser/hardware acceptance.
+
+[Browser observations](https://github.com/YoungSx/onecloud-meson8b-vcodec/blob/e82a3334681b686424fcc8e5eef411d2586d683f/evidence/p0-p3-2026-11-22/browser-observed.json)
+apply to the earlier image: bounded playback, forward/backward seeks and
+cancellation, with buffering observed. They do not establish realtime playback.
+The driver candidate required two local device recoveries during later tests;
+original modules/services are restored and sustained production load tests are
+paused. See the separate
+[driver stability record](https://github.com/YoungSx/onecloud-meson8b-vcodec/blob/e82a3334681b686424fcc8e5eef411d2586d683f/docs/next-development-status.md).
+
+中文：最新版前端已通过完整 lint、72 项测试、构建和 CI。干净镜像保持官方
+FFmpeg，尚未替换生产版本，最新版浏览器/硬件验收仍待完成。此前播放有
+缓冲，不能作为实时性能保证；驱动验证期间两次离线后原服务已恢复，生产
+持续负载测试暂停。
 
 The old private-extension rate-budget image is superseded. Dated historical
 results remain available but must not be used as official compatibility proof.
