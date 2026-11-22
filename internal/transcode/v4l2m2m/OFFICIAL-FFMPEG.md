@@ -34,7 +34,7 @@ Image `youngsx/openlist-onecloud:v4.2.10-official-ffmpeg-a845b34-clean`
 contains backend code `6c77764f` and frontend `a845b34`,with residual generated
 assets removed. FFmpeg/ffprobe match the pinned official base byte-for-byte.
 It now runs on production with the explicitly authorized development driver
-source `1a1d1f7`; original v0.4.0 codec installation is retained for rollback.
+source `5fedae9`; original v0.4.0 codec installation is retained for rollback.
 The superseded image without the `-clean` suffix is not used for acceptance.
 
 The clean image passed bounded actual browser HLS playback,uncached forward
@@ -51,8 +51,8 @@ FFmpeg. Unknown color metadata is not invented; stock `h264_metadata` can
 supply explicit output tags after an actual colorspace conversion.
 
 Prior device outages remain unexplained. Sustained production load tests are
-paused; bounded playback and CI do not establish long-term stability. Legacy
-codec tails and the1.3× realtime target remain open. Source and tests remain
+paused; bounded playback and CI do not establish long-term stability. H.264/HEVC joined-resolution content checks and busy-device takeover pass.
+Legacy codec tails and the1.3× realtime target remain open. Source and tests remain
 compatible with official FFmpeg without private control extensions.
 
 中文：新版干净 OpenList 镜像已运行，新驱动按授权部署，原安装保留可回滚。
