@@ -128,3 +128,9 @@ retains the existing permissive behavior; device selection remains conservative.
 Hardware acceptance belongs to a specific image and sample set. HTTP HLS
 segment validation does not establish browser rendering, all stream profiles
 or long-running production stability; driver tests are separate evidence.
+
+Playback clients may GET the sibling `status` URL next to `master.m3u8` using
+its read token. The response is uncached and contains state, a redacted error,
+measured warning and a copy of the selected profile; worker tokens and signed
+source URLs are omitted. The player includes bounded preparation in its HLS
+manifest wait and reads this status after preparation or fatal HLS errors.
