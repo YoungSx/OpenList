@@ -1,0 +1,657 @@
+{
+  "status": "pass",
+  "image": "youngsx/openlist-onecloud:v4.2.10-official-ffmpeg-a137737",
+  "backend_commit": "a137737a4c219fc9c5446419beaf3d3f42f698f9",
+  "encoder_sha256": "e72e3a6697b5f7296520f8b339b7c7e6af9147b299d0639e92c5e42128f4747b",
+  "cases": [
+    {
+      "label": "warn-low-target",
+      "status": "pass",
+      "segments": [
+        {
+          "seq": 0,
+          "bytes": 1711176,
+          "wait_seconds": 10.778,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "1.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 6844704
+        },
+        {
+          "seq": 1,
+          "bytes": 1780548,
+          "wait_seconds": 7.424,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "3.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7122192
+        },
+        {
+          "seq": 2,
+          "bytes": 1756672,
+          "wait_seconds": 6.832,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "5.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 7026688
+        }
+      ],
+      "initial_bandwidth": {
+        "BANDWIDTH": 6844704,
+        "AVERAGE-BANDWIDTH": 6844704
+      },
+      "final_bandwidth": {
+        "BANDWIDTH": 7122192,
+        "AVERAGE-BANDWIDTH": 6893710
+      },
+      "observed": [
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "",
+          "probe": false
+        }
+      ],
+      "warning": "requested video bitrate 1000000 bps; measured HLS bandwidth 6893710 bps, reduce output size/frame rate or use software encoding if bandwidth is limited",
+      "effective_profile": {
+        "name": "source",
+        "video_codec": "h264",
+        "video_bitrate": "1000k",
+        "scale": "",
+        "audio_codec": "aac",
+        "audio_bitrate": "96k",
+        "hwaccel": "v4l2m2m",
+        "rate_policy": "warn"
+      },
+      "native_stats": {
+        "frames": 360,
+        "bytes": 9922693,
+        "target_bps": 1000000,
+        "current_bps": 6177220,
+        "peak_bps": 18794400,
+        "window_ns": 1033333323,
+        "qp": 32,
+        "saturated_frames": 358,
+        "saturated_ns": 11933333214,
+        "overshoots": 360,
+        "overflows": 0,
+        "peak_limit_bps": 0,
+        "cpb_bytes": 0,
+        "credit_bits": 0,
+        "budget_violations": 0,
+        "limit_terminal": 0
+      }
+    },
+    {
+      "label": "fail-explicit-unsupported",
+      "status": "pass",
+      "http_codes": [
+        500,
+        500,
+        500,
+        500
+      ],
+      "elapsed_seconds": 0.038,
+      "job_status": "failed",
+      "explicit_mapping_error": true
+    },
+    {
+      "label": "official-short-fractional",
+      "status": "pass",
+      "segments": [
+        {
+          "seq": 0,
+          "bytes": 437664,
+          "wait_seconds": 1.85,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "1.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.002,
+          "segment_bps": 1748908
+        },
+        {
+          "seq": 1,
+          "bytes": 442364,
+          "wait_seconds": 1.593,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "3.423333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.002,
+          "segment_bps": 1767689
+        },
+        {
+          "seq": 2,
+          "bytes": 438604,
+          "wait_seconds": 1.693,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "5.425333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.002,
+          "segment_bps": 1752664
+        },
+        {
+          "seq": 3,
+          "bytes": 115808,
+          "wait_seconds": 1.042,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 640,
+            "height": 360,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "start_time": "7.427333",
+            "nb_read_frames": "15"
+          },
+          "software_decode": true,
+          "duration": 0.5,
+          "segment_bps": 1852928
+        }
+      ],
+      "initial_bandwidth": {
+        "BANDWIDTH": 1851077,
+        "AVERAGE-BANDWIDTH": 1763701
+      },
+      "final_bandwidth": {
+        "BANDWIDTH": 1851077,
+        "AVERAGE-BANDWIDTH": 1763701
+      },
+      "observed": [
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30000/1001",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "",
+          "probe": false
+        }
+      ],
+      "warning": "",
+      "effective_profile": {
+        "name": "source",
+        "video_codec": "h264",
+        "video_bitrate": "1600k",
+        "scale": "",
+        "audio_codec": "aac",
+        "audio_bitrate": "96k",
+        "hwaccel": "v4l2m2m",
+        "rate_policy": "warn"
+      },
+      "native_stats": {
+        "frames": 195,
+        "bytes": 1295103,
+        "target_bps": 1600000,
+        "current_bps": 1649118,
+        "peak_bps": 3134625,
+        "window_ns": 1000999980,
+        "qp": 26,
+        "saturated_frames": 0,
+        "saturated_ns": 0,
+        "overshoots": 68,
+        "overflows": 0,
+        "peak_limit_bps": 0,
+        "cpb_bytes": 0,
+        "credit_bits": 0,
+        "budget_violations": 0,
+        "limit_terminal": 0
+      }
+    },
+    {
+      "label": "downscale-seek",
+      "status": "pass",
+      "segments": [
+        {
+          "seq": 0,
+          "bytes": 239512,
+          "wait_seconds": 3.38,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "1.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 958048
+        },
+        {
+          "seq": 1,
+          "bytes": 244024,
+          "wait_seconds": 2.961,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "3.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 976096
+        },
+        {
+          "seq": 2,
+          "bytes": 257560,
+          "wait_seconds": 5.133,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "5.421333",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1030240
+        },
+        {
+          "seq": 18,
+          "bytes": 261696,
+          "wait_seconds": 13.879,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "37.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1046784
+        },
+        {
+          "seq": 19,
+          "bytes": 241016,
+          "wait_seconds": 3.951,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "39.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 964064
+        },
+        {
+          "seq": 6,
+          "bytes": 264704,
+          "wait_seconds": 9.372,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "13.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1058816
+        },
+        {
+          "seq": 7,
+          "bytes": 257560,
+          "wait_seconds": 3.616,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "15.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1030240
+        },
+        {
+          "seq": 8,
+          "bytes": 250980,
+          "wait_seconds": 3.861,
+          "video": {
+            "codec_name": "h264",
+            "profile": "Baseline",
+            "width": 854,
+            "height": 480,
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "start_time": "17.400000",
+            "nb_read_frames": "60"
+          },
+          "software_decode": true,
+          "duration": 2.0,
+          "segment_bps": 1003920
+        }
+      ],
+      "initial_bandwidth": {
+        "BANDWIDTH": 958048,
+        "AVERAGE-BANDWIDTH": 958048
+      },
+      "final_bandwidth": {
+        "BANDWIDTH": 1058816,
+        "AVERAGE-BANDWIDTH": 993919
+      },
+      "observed": [
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "",
+          "probe": true
+        },
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "scale=1280:-2",
+          "probe": true
+        },
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "scale=854:-2",
+          "probe": true
+        },
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "scale=854:-2",
+          "probe": false
+        },
+        {
+          "codecs": [
+            "h264_v4l2m2m",
+            "h264_v4l2m2m"
+          ],
+          "frame_rate": "30/1",
+          "fps_mode": "cfr",
+          "gop": "60",
+          "maxrate": false,
+          "bufsize": false,
+          "rate_limit": "",
+          "vf": "scale=854:-2,setpts=PTS-STARTPTS",
+          "probe": false
+        }
+      ],
+      "warning": "rate budget selected output scale 854:-2 before playback",
+      "effective_profile": {
+        "name": "source",
+        "video_codec": "h264",
+        "video_bitrate": "800k",
+        "scale": "854:-2",
+        "audio_codec": "aac",
+        "audio_bitrate": "96k",
+        "hwaccel": "v4l2m2m",
+        "rate_policy": "downscale"
+      },
+      "native_stats": {
+        "frames": 226,
+        "bytes": 815986,
+        "target_bps": 800000,
+        "current_bps": 776763,
+        "peak_bps": 4607040,
+        "window_ns": 1033333323,
+        "qp": 32,
+        "saturated_frames": 224,
+        "saturated_ns": 7466666592,
+        "overshoots": 182,
+        "overflows": 0,
+        "peak_limit_bps": 0,
+        "cpb_bytes": 0,
+        "credit_bits": 0,
+        "budget_violations": 0,
+        "limit_terminal": 0
+      }
+    }
+  ],
+  "production_settings_changed": false,
+  "browser_tested": false,
+  "standalone_worker_hardware_tested": false,
+  "last_native_stats": {
+    "frames": 226,
+    "bytes": 815986,
+    "target_bps": 800000,
+    "current_bps": 776763,
+    "peak_bps": 4607040,
+    "window_ns": 1033333323,
+    "qp": 32,
+    "saturated_frames": 224,
+    "saturated_ns": 7466666592,
+    "overshoots": 182,
+    "overflows": 0,
+    "peak_limit_bps": 0,
+    "cpb_bytes": 0,
+    "credit_bits": 0,
+    "budget_violations": 0,
+    "limit_terminal": 0
+  },
+  "last_effective_profile": {
+    "name": "source",
+    "video_codec": "h264",
+    "video_bitrate": "800k",
+    "scale": "854:-2",
+    "audio_codec": "aac",
+    "audio_bitrate": "96k",
+    "hwaccel": "v4l2m2m",
+    "rate_policy": "downscale"
+  },
+  "current_case": {
+    "label": "official-short-fractional",
+    "segments": [
+      {
+        "seq": 0,
+        "bytes": 437664,
+        "wait_seconds": 1.85,
+        "video": {
+          "codec_name": "h264",
+          "profile": "Baseline",
+          "width": 640,
+          "height": 360,
+          "r_frame_rate": "30000/1001",
+          "avg_frame_rate": "30000/1001",
+          "start_time": "1.421333",
+          "nb_read_frames": "60"
+        },
+        "software_decode": true,
+        "duration": 2.002,
+        "segment_bps": 1748908
+      },
+      {
+        "seq": 1,
+        "bytes": 442364,
+        "wait_seconds": 1.593,
+        "video": {
+          "codec_name": "h264",
+          "profile": "Baseline",
+          "width": 640,
+          "height": 360,
+          "r_frame_rate": "30000/1001",
+          "avg_frame_rate": "30000/1001",
+          "start_time": "3.423333",
+          "nb_read_frames": "60"
+        },
+        "software_decode": true,
+        "duration": 2.002,
+        "segment_bps": 1767689
+      },
+      {
+        "seq": 2,
+        "bytes": 438604,
+        "wait_seconds": 1.693,
+        "video": {
+          "codec_name": "h264",
+          "profile": "Baseline",
+          "width": 640,
+          "height": 360,
+          "r_frame_rate": "30000/1001",
+          "avg_frame_rate": "30000/1001",
+          "start_time": "5.425333",
+          "nb_read_frames": "60"
+        },
+        "software_decode": true,
+        "duration": 2.002,
+        "segment_bps": 1752664
+      },
+      {
+        "seq": 3,
+        "bytes": 115808,
+        "wait_seconds": 1.042,
+        "video": {
+          "codec_name": "h264",
+          "profile": "Baseline",
+          "width": 640,
+          "height": 360,
+          "r_frame_rate": "30000/1001",
+          "avg_frame_rate": "30000/1001",
+          "start_time": "7.427333",
+          "nb_read_frames": "15"
+        },
+        "software_decode": true,
+        "duration": 0.5,
+        "segment_bps": 1852928
+      }
+    ],
+    "periods": {
+      "0": 2.002,
+      "1": 2.002,
+      "2": 2.002,
+      "3": 0.5
+    },
+    "measured": {
+      "BANDWIDTH": 1851077,
+      "AVERAGE-BANDWIDTH": 1763701
+    },
+    "expected_average": 1763837
+  },
+  "original_encoder_restored": true,
+  "production_started_at_unchanged": true,
+  "production_restart_count": 0,
+  "final_services": {
+    "openlist": 200,
+    "sublink": 200,
+    "vocat": 200,
+    "homeassistant": 200,
+    "arcane_running": true
+  },
+  "decoder_pool_slots": 0,
+  "decoder_pool_bytes": 0,
+  "seconds": 164.262,
+  "kernel_fatal_messages": []
+}
