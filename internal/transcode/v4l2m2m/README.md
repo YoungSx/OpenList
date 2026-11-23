@@ -1,136 +1,116 @@
-# V4L2 M2M transcoding
+# Stateful V4L2 transcoding / V4L2 转码
 
-Select `v4l2m2m` in the transcoding hardware acceleration setting, or pass
-`-hwaccel v4l2m2m` to the standalone worker. The default remains `none`.
-The FFmpeg executable must include the corresponding `*_v4l2m2m` codecs;
-these are named codecs rather than an FFmpeg `-hwaccel` backend.
-Device formats are intersected with the configured FFmpeg's decoder and
-encoder lists. Lists are cached by executable identity, size and modification
-time; replacing the program or changing its path refreshes detection.
+Use official unmodified FFmpeg. This fork selects standard `*_v4l2m2m` codecs;
+`v4l2m2m` is an OpenList setting, not a value for FFmpeg's `-hwaccel` option.
+It is tested on OneCloud S805 but contains no board-specific register logic.
 
-On Linux the worker queries `/dev/video*` for stateful memory-to-memory
-devices. Compressed OUTPUT formats select decoders; compressed CAPTURE
-formats select encoders whose raw OUTPUT accepts NV12. Frame-size limits
-come from `ENUM_FRAMESIZES`, with `TRY_FMT` as the encoder fallback.
-Unknown source pixel formats and 10-bit/4:2:2 sources use software decoding.
-Encoding can still use hardware when the scaled output fits the device.
-Unsupported codec/geometry and absent devices select the existing software
-codecs. An FFmpeg runtime or device failure is reported normally; this does
-not retry a partially written HLS chunk with software.
+## Quick start / 快速开始
 
-Known device nodes are cached by inode so discovery does not reopen an
-exclusive codec during a transcode. Busy nodes are retried on a later
-discovery and removed/recreated nodes are refreshed. Stateless request-API
-codecs are not implemented by this integration.
+1. Install a working stateful V4L2 driver on the host. Confirm the relevant
+   FFmpeg decoder/encoder wrappers with `ffmpeg -decoders` and `-encoders`.
+2. In Docker, map the actual codec nodes, for example
+   `--device /dev/video0 --device /dev/video1`, and give the process access.
+   Mapping grants access even when the application already supports V4L2.
+3. Select `v4l2m2m` under hardware acceleration, or use `-hwaccel v4l2m2m` in
+   the standalone worker. Default remains `none`.
+4. Start with `transcode_rate_policy=warn` and peak/buffer fields blank.
+   Device discovery and codec presence alone do not prove stream compatibility.
 
-In Docker, explicitly map the codec devices into the container, for example
-`--device /dev/video0 --device /dev/video1`, and grant the worker permission
-to open them. Startup logs show the detected compressed formats and limits.
-Device discovery does not prove every profile or stream is supported.
+宿主先有可用驱动，容器映射实际设备，再选择V4L2。以官方FFmpeg为目标，
+不依赖私有扩展；默认平均码率告警不限制网络带宽。
 
-V4L2 sessions conservatively use one hardware process per local manager,
-including the legacy whole-file path when duration is unknown. Waiting for
-the device can be cancelled without waiting for the current process.
-Seeking cancels the old chunk and waits for the process to exit
-before another hardware chunk starts; prefetch runs after the current chunk
-finishes. Software fallback sessions using the `v4l2m2m` setting retain this
-serialization so devices becoming available later cannot bypass it. The
-standalone worker also advertises and runs one slot in this mode. Other
-hardware backends and ordinary software concurrency keep their existing
-behavior. Separate worker processes must not share an exclusive device.
+## Selection and scheduling
 
-Local and standalone workers share the HLS argument builder. Both exclude
-subtitle/data streams, convert the `copy` audio setting to AAC for browser
-compatibility, and align key frames with segment boundaries. The local runner
-preserves source timestamps for sought hardware-decoded chunks. Hardware
-encoders receive NV12 without the software encoder's named High profile/preset
-options. V4L2 master playlists omit the optional `CODECS` attribute because
-the profile cannot be predicted from the requested codec alone.
+Discovery intersects stateful M2M compressed OUTPUT/CAPTURE formats with the
+configured executable's decoder/encoder lists. Hardware encoding requires NV12
+input; size limits use ENUM_FRAMESIZES or encoder TRY_FMT. Unknown source pixel
+formats and 10-bit/4:2:2 input use software decoding; a suitable scaled output
+may still use hardware encoding. Absent/unsupported devices select existing
+software codecs. A running FFmpeg/device failure is reported; partially written
+chunks are not silently retried with software. Stateless request API is absent.
 
-Source probing reads the average frame rate, falling back to the stream rate.
-Both workers produce CFR at that rational rate (1–240 fps; unknown rates use
-30/1) and set the GOP to `ceil(fps × segment duration)`. Fractional-rate segment
-durations and a short final segment come from FFmpeg's playlist rather than a
-fixed duration. The frame-rate range describes argument validation, not a
-device performance guarantee.
+Device cache identity includes inode; FFmpeg detection refreshes after executable
+replacement. One hardware process runs per local manager or standalone worker,
+including unknown-duration/whole-file paths. Seek cancels and waits for the old
+process before the next begins; prefetch follows current-chunk completion.
+Separate managers/workers must not share an exclusive hardware engine.
 
-Sought hardware input keeps nonnegative source timestamps into V4L2. Video and
-audio filters then rebase the chunk before CFR encoding, its duration is bounded
-relative to that start, and the muxer restores the seek offset. This keeps later
-chunks on the same playback timeline as the first chunk.
+## HLS and rate policy
 
-`VideoBitrate` is a target for the device's rate controller. The default
-`transcode_rate_policy=warn` sends `-b:v` to V4L2; upstream FFmpeg does not map
-`-maxrate`/`-bufsize` to its peak/CPB controls. Other encoder backends keep their
-existing arguments. This integration does not provide a strict network
-bandwidth cap.
-After the first segment is ready, the master playlist advertises the greater
-of the requested video-plus-audio rate and the highest measured segment rate.
-`AVERAGE-BANDWIDTH` uses total segment bytes divided by their total media
-duration, including audio and TS overhead. Measurements update as chunks finish,
-and the master response has a two-second cache lifetime. Past segment rates
-cannot guarantee a future scene's peak rate.
+Local and standalone workers share arguments and source/profile types. They keep
+rational source rates as CFR (valid range1–240; unknown uses30/1), align GOP/keyframes
+to segments, use actual playlist durations and preserve sought timestamps.
+Audio `copy` becomes AAC; subtitle/data streams are excluded. Hardware encoders
+receive NV12 without software preset/High-profile options. The master omits
+CODECS rather than guessing a hardware profile.
 
-For local V4L2 jobs, an observed average above 125% of the requested
-video-plus-audio rate after at least three segments produces a `warning` in
-`GET /api/admin/transcode/jobs` and one log message. Playback continues. Select
-a smaller output resolution or software encoding when the connection cannot
-carry the measured rate.
-
-The opt-in policies use the existing profile, worker and chunk paths:
-
-| Setting | Behavior |
+| Setting | V4L2 behavior |
 | --- | --- |
-| `transcode_rate_policy=warn` | Default target tracking and overshoot warning; playback continues. |
-| `transcode_rate_policy=fail` | Require native peak/buffer support; unsupported V4L2 paths fail explicitly. |
-| `transcode_rate_policy=downscale` | Probe measured HLS output before publication, then keep one selected size. |
-| `transcode_peak_bitrate` | Video bits per second; blank uses the requested target. |
-| `transcode_buffer_size` | Video buffer in **bits**, like FFmpeg `-bufsize`; blank allows two seconds of peak rate. |
+| `transcode_rate_policy=warn` | Default: send target `-b:v`; report measured average overshoot and continue playback. |
+| `transcode_rate_policy=downscale` | With peak/buffer blank, probe output and keep one chosen size for the job. |
+| `transcode_rate_policy=fail` | Reject: checked official wrappers do not forward native peak/CPB controls. |
+| `transcode_peak_bitrate` / `transcode_buffer_size` | Explicit values are rejected on V4L2; other native backends keep maxrate/bufsize behavior. Units are bps / bits. |
 
-Official unmodified FFmpeg is the compatibility target. The private
-`v4l2_rate_limit` experiment is retired. The configured executable is checked
-only for standard decoder/encoder wrappers; no private capability probe runs.
-Standard `-b:v`, `-qmin/-qmax`, `-g` and output frame rate are supported by the
-upstream V4L2 wrapper. Encoder-specific help lists private options only.
+The checked official wrappers forward target bitrate, QP, GOP and frame period;
+no private capability probe runs. They do not forward peak/CPB controls.
+Direct V4L2 clients can still use a driver's standard controls.
 
-For V4L2, `warn` uses target tracking. `downscale` with peak/buffer fields left
-blank probes actual HLS output and selects a stable geometry before publication.
-This does not claim a CPB/peak envelope. `fail` or explicit peak/buffer limits
-are rejected on this path because the checked official wrappers do not forward
-those controls; use an encoder with native support when those are required.
-The direct V4L2 driver controls remain available to other clients. Other native
-encoder backends retain maxrate/bufsize handling.
+Downscale probes up to six media seconds within a shared90-second wall-time
+budget. It preserves aspect ratio, never upscales, and tries requested geometry
+then smaller widths1280/854/640/426/320. Complete HLS output must average within
+125% of target video+audio, allowing mux overhead. Probe files are cleaned and
+the selected geometry survives chunking/reactivation. Future scenes may exceed
+that rate: this is measured average selection, not a CPB or network cap.
 
-Downscale probes up to six media seconds with all candidates sharing a
-90-second wall-time budget. First-playlist waits include that budget. Candidates
-preserve aspect ratio, never upscale, and try the requested size then smaller
-widths among 1280/854/640/426/320. Complete HLS output must average within 125%
-of target video plus audio, allowing muxing overhead. Temporary probe files are
-removed on every exit. The selected profile keeps its cache identity and is
-reused across chunks and reactivation. Future scenes can exceed the measured
-rate; this policy is not a network cap or a prediction of future output.
+Master bandwidth uses the greater of requested audio+video and highest measured
+segment rate; average bandwidth uses total bytes/media duration, including mux
+overhead. Responses cache for two seconds. After three segments, local average
+overshoot above125% produces an admin warning and one log message.
+The sibling read-token `status` endpoint reports preparation/profile/warnings and
+redacted errors without source URLs or worker secrets. The player waits through
+bounded preparation and disposes replaced HLS instances.
 
-Use stock FFmpeg from the existing image. A shared-buffer raw NV12 crash,
-drain truncation or incorrectly propagated terminal error requires an independent
-reproducer before any optional bug patch is used. Do not deploy the earlier
-private-extension test image as the official compatibility solution.
+## Current image and limits
 
-官方原版 FFmpeg 是兼容目标，不使用私有码控扩展。V4L2 `warn` 跟踪目标，
-`downscale` 在峰值/缓冲留空时按实测 HLS 平均码率试编码，选择尺寸并在
-任务中保持稳定；它不保证 CPB 或未来场景峰值。显式峰值/缓冲预算和
-`fail` 在该路径清晰报错，原生支持预算的其他编码器仍可使用。只有明确
-复现的 bug 才保留可选最小修复，不以 FFmpeg fork 弥补功能。
+The recorded production image is
+`youngsx/openlist-onecloud:v4.2.10-official-ffmpeg-a845b34-clean`:
+backend code`6c77764f`, frontend`a845b34`, original base FFmpeg8.1.3 unchanged.
+Latest branch heads may include later documentation. The OneCloud driver is
+`5fedae9`; driver source/build/rollback live in a separate repository.
 
-The play endpoint first filters size/extension, then checks source codec and
-bitrate again after ffprobe before submitting a job. An unknown probe field
-retains the existing permissive behavior; device selection remains conservative.
+Bounded actual browser playback, forward/backward seeks and cancellation pass;
+buffering occurs. Neither realtime1080p nor long-running production stability
+is guaranteed. Legacy codec tails/content and the driver's second LAN outage
+remain open. [Dated evidence](evidence/README.md) preserves exact versions,
+including retired experiments which are not compatibility instructions.
 
-Hardware acceptance belongs to a specific image and sample set. HTTP HLS
-segment validation does not establish browser rendering, all stream profiles
-or long-running production stability; driver tests are separate evidence.
+中文：自动发现、单任务调度、分数帧率、跳转时间线和实测HLS带宽已实现；
+`downscale`只按短探测平均码率选尺寸，不能保证未来峰值。最新干净镜像通过
+有界浏览器播放/跳转/取消，仍有缓冲；驱动实机与应用测试分别记录。
 
-Playback clients may GET the sibling `status` URL next to `master.m3u8` using
-its read token. The response is uncached and contains state, a redacted error,
-measured warning and a copy of the selected profile; worker tokens and signed
-source URLs are omitted. The player includes bounded preparation in its HLS
-manifest wait and reads this status after preparation or fatal HLS errors.
+## Rebuild after cloning
+
+Use Go from `go.mod` and the matching frontend branch, rather than the upstream
+frontend release selected by default in `build.sh`. In a fresh backend checkout:
+
+```sh
+# Build the companion frontend first: pnpm install --frozen-lockfile && pnpm build
+# Use an empty public/dist; stale assets must not survive frontend replacement.
+find public/dist -mindepth 1 ! -name README.md -delete
+cp -a /path/to/OpenList-Frontend/dist/. public/dist/
+mkdir -p build/local
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath \
+  -tags=jsoniter,netgo,osusergo -o build/local/openlist .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath \
+  -tags=jsoniter,netgo,osusergo -o build/local/worker ./cmd/worker
+```
+
+The production image recipe only copies the embedded-frontend backend into
+`/opt/openlist/openlist` of official base
+`docker.io/openlistteam/openlist@sha256:a33e7616190fd95e575d9c3b5d3214027887b2a18886615eb9eebdd7830d75f8`
+with owner1001:1001 and mode755. It does not replace FFmpeg/ffprobe.
+For an ARMv7 Docker build, use that pinned FROM and
+`COPY --chown=1001:1001 --chmod=755 build/local/openlist /opt/openlist/openlist`.
+Set provenance/version labels for the actual new source; do not reuse an old
+acceptance tag. An existing image archive is the exact-rollback artifact,
+not a promise of bit-identical output from a new toolchain.

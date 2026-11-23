@@ -28,7 +28,7 @@
 继续播放，以官方原版 FFmpeg 为目标；`downscale` 在首片发布前按实测
 码率试编码并固定尺寸，V4L2 显式峰值/缓冲预算清晰报错，不依赖私有扩展。参见
 [配置与码率语义](../internal/transcode/v4l2m2m/README.md)和
-[实机验收](../internal/transcode/v4l2m2m/VALIDATION.md)。
+[实机验收](../internal/transcode/v4l2m2m/evidence/README.md)。
 
 ## 免责声明
 

@@ -1,8 +1,10 @@
+> Historical snapshot; current setup and limits are in the [guide](../README.md).
+
 # Rate budget acceptance / 码率预算验收
 
 Historical acceptance for the recorded image. The private FFmpeg rate-limit
 experiment is retired; current development targets unmodified official FFmpeg.
-See [current compatibility](README.md).
+See [current compatibility](../README.md).
 
 Image: `youngsx/openlist-onecloud:v4.2.10-v4l2m2m-29c7842`, ARMv7.
 Backend/worker source: `29c7842afaa3691e824c4021f3d49b4cdc361f1a`.

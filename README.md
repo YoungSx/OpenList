@@ -31,7 +31,7 @@ and keeps one size; V4L2 explicit peak/buffer constraints are rejected rather
 than requiring private FFmpeg extensions.
 See the
 [setup and rate semantics](internal/transcode/v4l2m2m/README.md) and
-[hardware validation](internal/transcode/v4l2m2m/VALIDATION.md).
+[hardware validation](internal/transcode/v4l2m2m/evidence/README.md).
 
 ## Disclaimer
 

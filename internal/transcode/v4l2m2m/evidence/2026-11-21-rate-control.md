@@ -1,8 +1,10 @@
+> Historical snapshot; current setup and limits are in the [guide](../README.md).
+
 # Rate-control and frame-clock acceptance
 
 Historical acceptance for the recorded image. The private FFmpeg rate-limit
 experiment is retired; current development targets unmodified official FFmpeg.
-See [current compatibility](README.md).
+See [current compatibility](../README.md).
 
 Runtime source: `7da9ab4e8d7089285467cae4a3442178b92256fd`.
 Image: `youngsx/openlist-onecloud:v4.2.10-v4l2m2m-7da9ab4`, ARMv7.
